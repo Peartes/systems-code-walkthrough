@@ -1,0 +1,6 @@
+target/
+.claude
+CLAUDE.md
+# Claude Boris
+.claude/audit/
+.claude/settings.local.json
