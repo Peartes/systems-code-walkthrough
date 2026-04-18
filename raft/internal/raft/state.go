@@ -1,9 +1,12 @@
 package raft
 
 import (
+	"bytes"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	gob "github.com/peartes/raft/labgob"
 )
 
 // Peer represents a connection to another Raft node.
@@ -18,7 +21,7 @@ type Peer interface {
 // Log represent individual log entry stored in each raft servers logs
 type Log struct {
 	Term  int    // term this entry belongs
-	Entry string //
+	Entry []byte //
 }
 
 // This is the state of each raft server
@@ -54,6 +57,21 @@ type AppendEntryRes struct {
 	Appended bool // was the log entry successfull appended ?
 }
 
+// ApplyMsg is the message streamed in the applyChan channel to the state machine
+// the state machine is notified on the entries to apply from this channel
+type ApplyMsg struct {
+	Index int // the index of this message in the channel
+	Term  int // what term was this message finalized
+	Entry Log
+}
+
+// Persister persists raft data (into memeory for now)
+// the struct implements a save([]byte) and a load() method
+type Persister struct {
+	data []byte // data is serialized as [votedFor] - [term] - [logs]
+	// 										 1 byte		16byte
+}
+
 // Raft is the consensus module. One instance runs per server.
 // Fields will be filled in as you implement each component.
 type Raft struct {
@@ -69,38 +87,52 @@ type Raft struct {
 	logs        []Log
 
 	// non-persistent state
-	commitIndex int // the index of the last commited log entry for this server
-	lastApplied int // index of the last log entry applied to state machine
+	commitIndex int             // the index of the last commited log entry for this server
+	lastApplied int             // index of the last log entry applied to state machine
+	applyChan   chan<- ApplyMsg // channel to send apply entries on
+	applyCond   *sync.Cond      // the condition to trigger applying entries to state machine
+
 	// non-persistent on leaders
 	nextIndex  []int // for each server, index of the next log entry to be sent. initialized to leader lastLogIndex+1
 	matchIndex []int // for each server, index of the highest log entry known to be replicated on the server
 
 	lastHeartbeat   int64
 	electionTimeout time.Duration
+
+	persister *Persister // pointer to the persister for a raft node
 }
 
-// Make creates and starts a new Raft instance.
+// Make creates and starts a Raft instance.
 //
 // peers: one Peer per server in the cluster; peers[me] must be nil
 // me:    this server's index
 //
-// This is the constructor your tests will call. As you implement
-// election and replication, you will add fields to Raft and initialise
-// them here, then launch the background goroutines that drive the algorithm.
-func Make(peers []Peer, me int) *Raft {
+// This is the constructor tests will call
+func Make(peers []Peer, me int, applyChan chan<- ApplyMsg, persister *Persister) *Raft {
 	rf := &Raft{
 		peers: peers,
 		me:    me,
 	}
 	// TODO: initialise persistent state
-	rf.currentTerm = 0                        // read from persistent storage
-	rf.votedFor = -1                          // read from persistent storage
-	rf.logs = []Log{Log{Term: -1, Entry: ""}} // read from persistent storage; we initiated with a default state to prevent out of bounds error
+	rf.currentTerm = 0                           // read from persistent storage
+	rf.votedFor = -1                             // read from persistent storage
+	rf.logs = []Log{{Term: -1, Entry: []byte{}}} // read from persistent storage; we initiated with a default state to prevent out of bounds error
 	// initialize volatile state
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
+	rf.applyChan = applyChan
+	rf.applyCond = sync.NewCond(&rf.mu)
+	rf.persister = persister
+	// load the last saved state
+	rfBz := rf.persister.load()
+	if len(rfBz) != 0 {
+		currentTerm, votedFor, logs := rf.readPersist()
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.logs = logs
+	}
 	// start the election timer
 	go func() {
 		for {
@@ -115,6 +147,8 @@ func Make(peers []Peer, me int) *Raft {
 			}
 		}
 	}()
+	// start the applier routine
+	rf.applier()
 	return rf
 }
 
@@ -126,13 +160,22 @@ func (rf *Raft) GetState() (term int, isLeader bool) {
 	return rf.currentTerm, rf.state == Leader
 }
 
+func (rf *Raft) GetLog(idx int) (bool, Log) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if idx >= len(rf.logs) {
+		return false, Log{}
+	}
+	return true, rf.logs[idx]
+}
+
 // Start submits a command to the Raft log. If this server is the leader,
 // it appends the command and returns the index at which it will appear,
 // the current term, and true. If not the leader, returns -1, -1, false.
 //
 // Start must return quickly — it must not wait for replication to complete.
 // The test harness will poll for commitment separately.
-func (rf *Raft) Start(command interface{}) (index int, term int, isLeader bool) {
+func (rf *Raft) Start(command []byte) (index int, term int, isLeader bool) {
 	// if we are not the leader, reject the append request
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -141,10 +184,11 @@ func (rf *Raft) Start(command interface{}) (index int, term int, isLeader bool) 
 		return -1, -1, false
 	} else {
 		// append the log entry to logs, call append entry and return the index
-		rf.logs = append(rf.logs, command.(Log))
+		rf.logs = append(rf.logs, Log{Term: rf.currentTerm, Entry: command})
+		rf.persist()
 		// create a goroutine to send append entries so we can respond quicly to client
 		go func(term int) {
-			rf.sendEntries(rf.currentTerm, false)
+			rf.sendEntries(term)
 		}(rf.currentTerm)
 		return len(rf.logs) - 1, rf.currentTerm, rf.state == Leader
 	}
@@ -154,10 +198,74 @@ func (rf *Raft) Start(command interface{}) (index int, term int, isLeader bool) 
 // must check killed() and exit cleanly. Called by the harness on crash.
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
+	rf.applyCond.Broadcast()
 }
 
 // killed returns true if Kill has been called.
 // Every long-running goroutine in your implementation should check this.
 func (rf *Raft) killed() bool {
 	return atomic.LoadInt32(&rf.dead) == 1
+}
+
+// Applies all entries between lastApplied and commitIndex to state machine
+// does this by streaming the entries to the applyChan
+// Note: make sure you don't hold the rf.mu before calling this method
+func (rf *Raft) applier() {
+	go func() {
+		for !rf.killed() {
+			rf.mu.Lock()
+			for rf.lastApplied >= rf.commitIndex {
+				rf.applyCond.Wait()
+			}
+			if rf.lastApplied < rf.commitIndex {
+				lastApplied := rf.lastApplied
+				entries := rf.logs[rf.lastApplied+1 : rf.commitIndex+1]
+				rf.lastApplied = rf.commitIndex
+				rf.mu.Unlock() // we don't want to hold the lock and block on channel
+				for i, entry := range entries {
+					rf.applyChan <- ApplyMsg{
+						Index: lastApplied + 1 + i,
+						Term:  entry.Term,
+						Entry: entry,
+					}
+				}
+			}
+		}
+	}()
+}
+
+// persist encodes votedFor, currentTerm and logs using labgob
+// then hands them over to the persister to persist them
+func (rf *Raft) persist() {
+	rfBz := new(bytes.Buffer)
+	enc := gob.NewEncoder(rfBz)
+	raftData := struct {
+		VotedFor    int
+		CurrentTerm int
+		Logs        []Log
+	}{
+		CurrentTerm: rf.currentTerm,
+		VotedFor:    rf.votedFor,
+		Logs:        rf.logs,
+	}
+	if err := enc.Encode(raftData); err != nil {
+		panic("cannot encode raft data")
+	}
+	rfBzb := rfBz.Bytes()
+	rf.persister.store(&rfBzb)
+}
+
+// readPersist reads the content of the raft persister struct
+// this should contain the raft instance persisted non-volatile state
+// it returns the (currentTerm, votedFor, logs)
+func (rf *Raft) readPersist() (int, int, []Log) {
+	rfBz := rf.persister.load()
+	dec := gob.NewDecoder(bytes.NewBuffer(rfBz))
+	var rfData struct {
+		CurrentTerm int
+		VotedFor    int
+		Logs        []Log
+	}
+	dec.Decode(&rfData)
+	return rfData.CurrentTerm, rfData.VotedFor, rfData.Logs
 }

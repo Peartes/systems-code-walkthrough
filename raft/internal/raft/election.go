@@ -55,6 +55,7 @@ func (rf *Raft) startElection() {
 		// Todo: persist current term and votedFor
 		rf.currentTerm += 1
 		rf.votedFor = rf.me
+		rf.persist()
 
 		// keep track of vote count
 		var voteCount int32 = 1
@@ -92,6 +93,7 @@ func (rf *Raft) startElection() {
 								rf.state = Follower
 								rf.currentTerm = res.Term
 								rf.votedFor = -1
+								rf.persist()
 								rf.mu.Unlock()
 							} else {
 								// if we received the vote, atomically update th
@@ -140,7 +142,7 @@ func (rf *Raft) RequestVote(req RequestVoteReq, res *RequestVoteRes) {
 			rf.votedFor = -1
 			// convert to follower also since we're stale
 			rf.state = Follower
-			// claude: do we need to return here ?
+			rf.persist()
 		}
 		if rf.votedFor != -1 && rf.votedFor != req.Id {
 			res.Term = rf.currentTerm
@@ -160,6 +162,7 @@ func (rf *Raft) RequestVote(req RequestVoteReq, res *RequestVoteRes) {
 			res.Term = rf.currentTerm
 			res.VoteGranted = true
 			rf.votedFor = req.Id
+			rf.persist()
 			return
 		} else {
 			// now we check who has the longer log
@@ -175,6 +178,7 @@ func (rf *Raft) RequestVote(req RequestVoteReq, res *RequestVoteRes) {
 				rf.votedFor = req.Id
 				rf.currentTerm = req.Term
 			}
+			rf.persist()
 			return
 		}
 	}

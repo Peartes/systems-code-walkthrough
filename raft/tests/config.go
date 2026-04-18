@@ -17,15 +17,17 @@ import (
 // this object — they never touch Raft internals directly except
 // through GetState() and Start().
 type config struct {
-	t         *testing.T
-	mu        sync.Mutex
-	n         int
-	net       *rpc.Network
-	rafts     []*raft.Raft
-	servers   []*rpc.Server    // one rpc.Server per Raft instance
-	endnames  [][]string       // endnames[i][j] = name of the ClientEnd that server i uses to reach server j
-	peers     [][]*rpc.ClientEnd // peers[i][j] = the actual ClientEnd object (nil when i==j)
-	connected []bool           // connected[i] = is server i currently participating in the network?
+	t          *testing.T
+	mu         sync.Mutex
+	n          int
+	net        *rpc.Network
+	rafts      []*raft.Raft
+	applyChan  []chan raft.ApplyMsg // the state machine channels for each raft instance to receive apply instructions
+	servers    []*rpc.Server        // one rpc.Server per Raft instance
+	endnames   [][]string           // endnames[i][j] = name of the ClientEnd that server i uses to reach server j
+	peers      [][]*rpc.ClientEnd   // peers[i][j] = the actual ClientEnd object (nil when i==j)
+	connected  []bool               // connected[i] = is server i currently participating in the network?
+	persisters []*raft.Persister    // each raft instance persister
 }
 
 // make_config creates an n-node Raft cluster wired through a simulated network.
@@ -33,14 +35,16 @@ type config struct {
 // Call cfg.cleanup() at the end of every test.
 func make_config(t *testing.T, n int, unreliable bool) *config {
 	cfg := &config{
-		t:         t,
-		n:         n,
-		net:       rpc.NewNetwork(),
-		rafts:     make([]*raft.Raft, n),
-		servers:   make([]*rpc.Server, n),
-		endnames:  make([][]string, n),
-		peers:     make([][]*rpc.ClientEnd, n),
-		connected: make([]bool, n),
+		t:          t,
+		n:          n,
+		net:        rpc.NewNetwork(),
+		rafts:      make([]*raft.Raft, n),
+		applyChan:  make([]chan raft.ApplyMsg, n),
+		persisters: make([]*raft.Persister, n),
+		servers:    make([]*rpc.Server, n),
+		endnames:   make([][]string, n),
+		peers:      make([][]*rpc.ClientEnd, n),
+		connected:  make([]bool, n),
 	}
 	cfg.net.Reliable(!unreliable)
 
@@ -108,7 +112,11 @@ func (cfg *config) startRaft(i int) {
 		}
 	}
 
-	cfg.rafts[i] = raft.Make(peers, i)
+	cfg.applyChan[i] = make(chan raft.ApplyMsg)
+	if cfg.persisters[i] == nil {
+		cfg.persisters[i] = new(raft.Persister)
+	}
+	cfg.rafts[i] = raft.Make(peers, i, cfg.applyChan[i], cfg.persisters[i])
 
 	// Register the Raft instance as an RPC service so that incoming
 	// RequestVote and AppendEntries calls dispatched by rpc.Network

@@ -23,10 +23,6 @@ func (rf *Raft) AppendEntries(req AppendEntryReq, res *AppendEntryRes) {
 		rf.setNewElectionTimeout()
 		// set ourself to follower just in case we are a candidate
 		rf.state = Follower
-		// if the leader's term is higher, we need to update ours also
-		if req.Term > rf.currentTerm {
-			rf.currentTerm = req.Term
-		}
 		// now we check if we have the same entry at the prevLogIndex
 		if req.PrevLogIndex >= len(rf.logs) {
 			// bound check
@@ -34,6 +30,12 @@ func (rf *Raft) AppendEntries(req AppendEntryReq, res *AppendEntryRes) {
 			res.Term = rf.currentTerm
 			res.Appended = false
 			return
+		}
+		// if the leader's term is higher, we need to update ours also
+		if req.Term > rf.currentTerm {
+			rf.currentTerm = req.Term
+			rf.votedFor = -1
+			rf.persist()
 		}
 		if rf.logs[req.PrevLogIndex].Term == req.PrevLogTerm {
 			// we have the same entry, accept the append entry
@@ -50,6 +52,7 @@ func (rf *Raft) AppendEntries(req AppendEntryReq, res *AppendEntryRes) {
 						rf.logs = rf.logs[:j]
 						// append the leader's entries from this index to the end
 						rf.logs = append(rf.logs, req.Entries[i:]...)
+						rf.persist()
 						convergeIndex = len(req.Entries) // to make sure we don't re-append the entry below
 						break
 					} else {
@@ -60,11 +63,14 @@ func (rf *Raft) AppendEntries(req AppendEntryReq, res *AppendEntryRes) {
 				if convergeIndex < len(req.Entries) {
 					// there are un-appended logs
 					rf.logs = append(rf.logs, req.Entries[convergeIndex:]...)
+					rf.persist()
 				}
 			}
 			// now we set our commit index
 			if req.LeaderCommitIndex > rf.commitIndex {
 				rf.commitIndex = int(math.Min(float64(req.LeaderCommitIndex), float64(len(rf.logs)-1)))
+				// let's signal the applier to apply entries to the state machine
+				rf.applyCond.Signal()
 			}
 			res.Term = rf.currentTerm
 			res.Appended = true
