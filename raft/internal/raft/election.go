@@ -63,7 +63,7 @@ func (rf *Raft) startElection() {
 		req := RequestVoteReq{
 			Id:           rf.me,
 			Term:         rf.currentTerm,
-			LastLogIndex: len(rf.logs) - 1,
+			LastLogIndex: len(rf.logs) - 1 + rf.lastIncludedIndex,
 			LastLogTerm:  rf.logs[len(rf.logs)-1].Term,
 		}
 
@@ -166,7 +166,7 @@ func (rf *Raft) RequestVote(req RequestVoteReq, res *RequestVoteRes) {
 			return
 		} else {
 			// now we check who has the longer log
-			if req.LastLogIndex < len(rf.logs)-1 {
+			if req.LastLogIndex < len(rf.logs)-1+rf.lastIncludedIndex {
 				// candidate's log is not as recent as ours
 				res.Term = rf.currentTerm
 				res.VoteGranted = false

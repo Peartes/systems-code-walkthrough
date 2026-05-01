@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"math"
 	"time"
 )
@@ -20,11 +21,11 @@ func (rf *Raft) becomeLeader(term int) {
 	rf.state = Leader
 	// initialize nextIndex to lastLogIndex + 1
 	for i := range rf.peers {
-		rf.nextIndex[i] = len(rf.logs)
+		rf.nextIndex[i] = len(rf.logs) + rf.lastIncludedIndex
 		rf.matchIndex[i] = 0
 	}
 
-	// now create goroutine to send an empty appendEntry/heartbeat
+	// now create goroutine to send appendEntry/heartbeat
 	// to all peers at intervals
 	// to establish we're leader
 	go func(term int) {
@@ -72,89 +73,20 @@ func (rf *Raft) sendEntries(term int) {
 				// next index and not waste the call
 				rf.mu.Lock()
 				if !rf.killed() {
-					req := AppendEntryReq{
-						Id:                rf.me,
-						PrevLogIndex:      rf.nextIndex[peerId] - 1,
-						PrevLogTerm:       rf.logs[rf.nextIndex[peerId]-1].Term,
-						LeaderCommitIndex: rf.commitIndex,
-						Term:              rf.currentTerm,
-					}
-					// always include any entries the peer is missing.
-					// this covers both normal replication and catch-up after restart/reconnect.
-					// heartbeats become naturally empty when the follower is fully caught up
-					// (nextIndex == len(logs), so logs[nextIndex:] == []).
-					req.Entries = rf.logs[req.PrevLogIndex+1:]
-					rf.mu.Unlock()
-					res := new(AppendEntryRes)
-					ok := peer.Call("Raft.AppendEntries", req, res)
-					if !ok {
-						// something is wrong with our clientEnd
-						return
+					// we choose between sendAppendEntry or installSnapshot based
+					// on the entries the peer requires
+					// a next index value <= rf.lastIncludedIndex (our snapshot) means the peer needs to install our snapshot
+					// while any > lastIncludedIndex gets an append entry
+					fmt.Printf("[ROUTE] S%d→S%d nextIndex=%d lastIncludedIndex=%d\n",
+						rf.me, peerId, rf.nextIndex[peerId], rf.lastIncludedIndex)
+					if rf.nextIndex[peerId] <= rf.lastIncludedIndex {
+						fmt.Printf("[IS]    S%d→S%d sending InstallSnapshot (snapLastIdx=%d)\n",
+							rf.me, peerId, rf.persister.snapShot.lastIncludedIndex)
+						rf.sendInstallSnapshotHelper(peer, peerId, rf.persister.snapShot)
 					} else {
-						rf.mu.Lock()
-						// if we're not leader, ignore this stale request
-						if rf.state != Leader {
-							rf.mu.Unlock()
-							return
-							// if peer term is higher than ours, we're stale
-							// revert to follower
-						} else if res.Term > rf.currentTerm {
-							rf.currentTerm = res.Term
-							rf.votedFor = -1
-							rf.state = Follower
-							rf.persist()
-						} else {
-							if !res.Appended {
-								// the peer is stale on their logs
-								// decrement the next index for the peer
-								if rf.nextIndex[peerId] > 1 {
-									rf.nextIndex[peerId]--
-								}
-							} else {
-								// the peer replicated this log
-								// we can increase the next index for the peer
-								// because of race conditions, it's possible for multiple goroutines to modify these
-								// at the same time. A sample scenario
-								// When you call Start() three times in quick succession, each one spawns a goroutine
-								// that calls sendEntries. All three goroutines run concurrently and all read
-								// nextIndex[peerId] = 1 before any of them has updated it. Each computes
-								// entries = rf.logs[1:] — all three see the full 3-entry slice. All three RPCs succeed.
-								// Then each goroutine does:
-								// rf.nextIndex[peerId] += len(req.Entries)
-								// to avoid this problem, the nextIndex[peerId] is the prevLogIndex+len(entries)
-								rf.nextIndex[peerId] = max(rf.nextIndex[peerId], req.PrevLogIndex+len(req.Entries)+1)
-								// we can also increase the match index for this peer
-								// to the current replicated index
-								// using a max function here just in case another goroutine
-								// sending out non-empty append entries already updated this
-								// value to an higher one
-								rf.matchIndex[peerId] = int(math.Max(float64(rf.matchIndex[peerId]), float64(req.PrevLogIndex+len(req.Entries)))) // Todo: is there a better way ?
-								// let's update the leaders commit index also
-								// we find the highest index replicated on the majority of the servers
-								// and also greater than the last commit index
-								// Todo: use an efficient algo
-								commitCount := 0
-								for _, idx := range rf.matchIndex {
-									for _, j := range rf.matchIndex {
-										if j >= idx { // we count how many servers have replicated at least up to j i.e.
-											// how many servers have the log at j replicated and if a server has a higher index
-											// by the invariant, they must have the log at j
-											commitCount++
-										}
-									}
-									if commitCount >= len(rf.peers)/2 {
-										if idx > rf.commitIndex && rf.logs[idx].Term == rf.currentTerm {
-											// we have a new higher match index
-											rf.commitIndex = idx
-											// signal applier to apply entries to state machine
-											rf.applyCond.Signal()
-										}
-									}
-									commitCount = 0
-								}
-							}
-						}
-						rf.mu.Unlock()
+						fmt.Printf("[AE]    S%d→S%d sending AppendEntries (prevLogIdx=%d logLen=%d)\n",
+							rf.me, peerId, rf.nextIndex[peerId]-1, len(rf.logs))
+						rf.sendAppendEntryHelper(peer, peerId)
 					}
 				} else {
 					rf.mu.Unlock()
@@ -164,5 +96,150 @@ func (rf *Raft) sendEntries(term int) {
 		rf.mu.Unlock()
 	} else {
 		rf.mu.Unlock()
+	}
+}
+
+// this is a helper method to send appendentries to peers
+// make sure the calling function owns the rf.mu lock
+func (rf *Raft) sendAppendEntryHelper(peer Peer, peerId int) {
+	req := AppendEntryReq{
+		Id:                rf.me,
+		PrevLogIndex:      rf.nextIndex[peerId] - 1,
+		PrevLogTerm:       rf.logs[rf.nextIndex[peerId]-1-rf.lastIncludedIndex].Term,
+		LeaderCommitIndex: rf.commitIndex,
+		Term:              rf.currentTerm,
+	}
+	// always include any entries the peer is missing.
+	// this covers both normal replication and catch-up after restart/reconnect.
+	// heartbeats become naturally empty when the follower is fully caught up
+	// (nextIndex == len(logs), so logs[nextIndex:] == []).
+	req.Entries = rf.logs[req.PrevLogIndex+1-rf.lastIncludedIndex:]
+	rf.mu.Unlock()
+	res := new(AppendEntryRes)
+	ok := peer.Call("Raft.AppendEntries", req, res)
+	if !ok {
+		// something is wrong with our clientEnd
+		fmt.Printf("[AE-FAIL] S%d→S%d RPC failed (ok=false); nextIndex stays at %d\n",
+			rf.me, peerId, req.PrevLogIndex+1)
+		return
+	} else {
+		rf.mu.Lock()
+		// if we're not leader, ignore this stale request
+		if rf.state != Leader {
+			rf.mu.Unlock()
+			return
+			// if peer term is higher than ours, we're stale
+			// revert to follower
+		} else if res.Term > rf.currentTerm {
+			rf.currentTerm = res.Term
+			rf.votedFor = -1
+			rf.state = Follower
+			rf.persist()
+		} else {
+			if !res.Appended {
+				// the peer is stale on their logs
+				// decrement the next index for the peer
+				if rf.nextIndex[peerId] > 1 {
+					rf.nextIndex[peerId]--
+				}
+			} else {
+				// the peer replicated this log
+				// we can increase the next index for the peer
+				// because of race conditions, it's possible for multiple goroutines to modify these
+				// at the same time. A sample scenario
+				// When you call Start() three times in quick succession, each one spawns a goroutine
+				// that calls sendEntries. All three goroutines run concurrently and all read
+				// nextIndex[peerId] = 1 before any of them has updated it. Each computes
+				// entries = rf.logs[1:] — all three see the full 3-entry slice. All three RPCs succeed.
+				// Then each goroutine does:
+				// rf.nextIndex[peerId] += len(req.Entries)
+				// to avoid this problem, the nextIndex[peerId] is the prevLogIndex+len(entries)
+				rf.nextIndex[peerId] = max(rf.nextIndex[peerId], req.PrevLogIndex+len(req.Entries)+1)
+				// we can also increase the match index for this peer
+				// to the current replicated index
+				// using a max function here just in case another goroutine
+				// sending out non-empty append entries already updated this
+				// value to an higher one
+				rf.matchIndex[peerId] = int(math.Max(float64(rf.matchIndex[peerId]), float64(req.PrevLogIndex+len(req.Entries)))) // Todo: is there a better way ?
+				// let's update the leaders commit index also
+				// we find the highest index replicated on the majority of the servers
+				// and also greater than the last commit index
+				// Todo: use an efficient algo
+				rf.getNewCommitIndex()
+			}
+		}
+		rf.mu.Unlock()
+	}
+}
+
+// this is a helper method to send install snapshot to peers
+// make sure the calling function owns the rf.mu lock
+func (rf *Raft) sendInstallSnapshotHelper(peer Peer, peerId int, snapshot Snapshot) {
+	req := InstallSnapshotReq{
+		Term:              rf.currentTerm,
+		LeaderId:          rf.me,
+		LastIncludedIndex: snapshot.lastIncludedIndex,
+		LastIncludedTerm:  snapshot.lastIncludedTerm,
+		Data:              snapshot.data,
+		Offset:            0,
+		Done:              true, // we will send the whole snapshot at once for now
+	}
+	res := new(InstallSnapshotRes)
+	rf.mu.Unlock()
+	ok := peer.Call("Raft.InstallSnapshot", req, res)
+	if !ok {
+		// something is wrong with our clientend
+		return
+	} else {
+		rf.mu.Lock()
+		// if we're not leader, ignore this stale request
+		if rf.state != Leader {
+			rf.mu.Unlock()
+			return
+			// if peer term is higher than ours, we're stale
+			// revert to follower
+		} else if res.Term > rf.currentTerm {
+			rf.currentTerm = res.Term
+			rf.votedFor = -1
+			rf.state = Follower
+			rf.persist()
+		} else {
+			// since we sent all snapshot at once, we can increase the peer's nextindex and our commit index
+			rf.nextIndex[peerId] = req.LastIncludedIndex + 1
+			// we can also increase the match index for this peer
+			// to the current replicated index
+			// using a max function here just in case another goroutine
+			// sending out non-empty append entries already updated this
+			// value to an higher one
+			rf.matchIndex[peerId] = int(math.Max(float64(rf.matchIndex[peerId]), float64(req.LastIncludedIndex))) // Todo: is there a better way ?
+			// get new commit index
+			rf.getNewCommitIndex()
+		}
+		rf.mu.Unlock()
+	}
+}
+
+// helper function to get new commit index for raft leader
+func (rf *Raft) getNewCommitIndex() {
+	// Todo: use an efficient algo
+	commitCount := 0
+	for _, idx := range rf.matchIndex {
+		for _, j := range rf.matchIndex {
+			if j >= idx { // we count how many servers have replicated at least up to j i.e.
+				// how many servers have the log at j replicated and if a server has a higher index
+				// by the invariant, they must have the log at j
+				commitCount++
+			}
+		}
+		if commitCount >= len(rf.peers)/2 {
+			sliceIdx := idx - rf.lastIncludedIndex
+			if idx > rf.commitIndex && sliceIdx > 0 && sliceIdx < len(rf.logs) && rf.logs[sliceIdx].Term == rf.currentTerm {
+				// we have a new higher match index
+				rf.commitIndex = idx
+				// signal applier to apply entries to state machine
+				rf.applyCond.Signal()
+			}
+		}
+		commitCount = 0
 	}
 }

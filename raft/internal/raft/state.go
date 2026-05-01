@@ -2,6 +2,8 @@ package raft
 
 import (
 	"bytes"
+	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,12 +59,27 @@ type AppendEntryRes struct {
 	Appended bool // was the log entry successfull appended ?
 }
 
+type InstallSnapshotReq struct {
+	Term              int // leader term
+	LeaderId          int
+	LastIncludedIndex int // for the follower to update it's state
+	LastIncludedTerm  int
+	Data              []byte // a chunk of the snapshot
+	Offset            int    // byte offset where the chunk is positioned in the snapshot
+	Done              bool   // true if this is the last chunk of the snapshot
+}
+
+type InstallSnapshotRes struct {
+	Term int // followers term for leader to update itself
+}
+
 // ApplyMsg is the message streamed in the applyChan channel to the state machine
 // the state machine is notified on the entries to apply from this channel
 type ApplyMsg struct {
-	Index int // the index of this message in the channel
-	Term  int // what term was this message finalized
-	Entry Log
+	Index    int // the index of this message in the channel
+	Term     int // what term was this message finalized
+	Entry    Log
+	Snapshot []byte // snapshot message for state machine
 }
 
 // Persister persists raft data (into memeory for now)
@@ -70,6 +87,14 @@ type ApplyMsg struct {
 type Persister struct {
 	data []byte // data is serialized as [votedFor] - [term] - [logs]
 	// 										 1 byte		16byte
+	snapShot             Snapshot // the complete raft instance snapshot
+	snapShotIntermediate Snapshot // the intermediate snapshot file while it's been streamed from leader
+}
+
+type Snapshot struct {
+	lastIncludedIndex int // the lastIncludedIndex of this snapshot
+	lastIncludedTerm  int
+	data              []byte
 }
 
 // Raft is the consensus module. One instance runs per server.
@@ -100,6 +125,9 @@ type Raft struct {
 	electionTimeout time.Duration
 
 	persister *Persister // pointer to the persister for a raft node
+
+	lastIncludedIndex int // index of the last entry included in the most recent snapshot
+	lastIncludedTerm  int // term of the last entry included in the most recent snapshot
 }
 
 // Make creates and starts a Raft instance.
@@ -128,11 +156,16 @@ func Make(peers []Peer, me int, applyChan chan<- ApplyMsg, persister *Persister)
 	// load the last saved state
 	rfBz := rf.persister.load()
 	if len(rfBz) != 0 {
-		currentTerm, votedFor, logs := rf.readPersist()
+		currentTerm, votedFor, lastIncludedIndex, lastIncludedTerm, logs := rf.readPersist()
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.logs = logs
+		rf.lastIncludedIndex = lastIncludedIndex
+		rf.lastIncludedTerm = lastIncludedTerm
 	}
+	rf.mu.Lock()
+	rf.setNewElectionTimeout() // so that a newly restarted raft instance does not start an election immediately causing the old leader to step down (if the raft instance has a larger term)
+	rf.mu.Unlock()
 	// start the election timer
 	go func() {
 		for {
@@ -218,10 +251,27 @@ func (rf *Raft) applier() {
 				rf.applyCond.Wait()
 			}
 			if rf.lastApplied < rf.commitIndex {
+				var snapShot []byte
+				if rf.lastApplied < rf.lastIncludedIndex {
+					// send snapshot to state machine to update it to lastIncludedIndex
+					snapShot = rf.persister.snapShot.data
+					rf.lastApplied = rf.lastIncludedIndex
+				}
 				lastApplied := rf.lastApplied
-				entries := rf.logs[rf.lastApplied+1 : rf.commitIndex+1]
+				lastIncludedTerm := rf.lastIncludedTerm
+				entries := rf.logs[rf.lastApplied-rf.lastIncludedIndex+1 : rf.commitIndex-rf.lastIncludedIndex+1]
 				rf.lastApplied = rf.commitIndex
+				fmt.Printf("[APPLY] S%d: snapShot_nil=%v lastApplied=%d commitIdx=%d lastIncluded=%d entries=%d\n",
+					rf.me, snapShot == nil, lastApplied, rf.commitIndex, rf.lastIncludedIndex, len(entries))
 				rf.mu.Unlock() // we don't want to hold the lock and block on channel
+				// send the snapshot first if there is any
+				if snapShot != nil {
+					rf.applyChan <- ApplyMsg{
+						Index:    lastApplied,
+						Term:     lastIncludedTerm,
+						Snapshot: snapShot,
+					}
+				}
 				for i, entry := range entries {
 					rf.applyChan <- ApplyMsg{
 						Index: lastApplied + 1 + i,
@@ -240,32 +290,58 @@ func (rf *Raft) persist() {
 	rfBz := new(bytes.Buffer)
 	enc := gob.NewEncoder(rfBz)
 	raftData := struct {
-		VotedFor    int
-		CurrentTerm int
-		Logs        []Log
+		VotedFor          int
+		CurrentTerm       int
+		LastIncludedIndex int
+		LastIncludedTerm  int
+		Logs              []Log
 	}{
-		CurrentTerm: rf.currentTerm,
-		VotedFor:    rf.votedFor,
-		Logs:        rf.logs,
+		CurrentTerm:       rf.currentTerm,
+		VotedFor:          rf.votedFor,
+		LastIncludedIndex: rf.lastIncludedIndex,
+		LastIncludedTerm:  rf.lastIncludedTerm,
+		Logs:              rf.logs,
 	}
 	if err := enc.Encode(raftData); err != nil {
 		panic("cannot encode raft data")
 	}
 	rfBzb := rfBz.Bytes()
 	rf.persister.store(&rfBzb)
+
 }
 
 // readPersist reads the content of the raft persister struct
 // this should contain the raft instance persisted non-volatile state
 // it returns the (currentTerm, votedFor, logs)
-func (rf *Raft) readPersist() (int, int, []Log) {
+func (rf *Raft) readPersist() (int, int, int, int, []Log) {
 	rfBz := rf.persister.load()
 	dec := gob.NewDecoder(bytes.NewBuffer(rfBz))
 	var rfData struct {
-		CurrentTerm int
-		VotedFor    int
-		Logs        []Log
+		CurrentTerm       int
+		VotedFor          int
+		LastIncludedIndex int
+		LastIncludedTerm  int
+		Logs              []Log
 	}
 	dec.Decode(&rfData)
-	return rfData.CurrentTerm, rfData.VotedFor, rfData.Logs
+	return rfData.CurrentTerm, rfData.VotedFor, rfData.LastIncludedIndex, rfData.LastIncludedTerm, rfData.Logs
+}
+
+// Snapshot trims the raft logs up to and including index
+// persist the last included index and term
+// moves the commit index to the log just after the last inlcuded index
+func (rf *Raft) Snapshot(index int, data []byte) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.lastIncludedTerm = rf.logs[index-rf.lastIncludedIndex].Term
+	rf.logs = rf.logs[index-rf.lastIncludedIndex:] // slice from the index to the end and replace the index with the snapshot msg
+	rf.lastIncludedIndex = index
+	rf.logs[0].Term = rf.lastIncludedTerm
+	rf.logs[0].Entry = []byte{}
+	rf.persister.saveSnapshot(&data, 0, true, rf.lastIncludedIndex, rf.lastIncludedTerm)
+
+	rf.commitIndex = int(math.Max(float64(rf.commitIndex), float64(index)))
+	rf.lastApplied = int(math.Max(float64(rf.lastApplied), float64(index)))
+	rf.persist()
 }
