@@ -1,14 +1,18 @@
 package tests
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/peartes/raft/internal/raft"
+	"github.com/peartes/raft/internal/telemetry"
 	"github.com/peartes/raft/tests/rpc"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // config is the test harness for a Raft cluster.
@@ -28,6 +32,11 @@ type config struct {
 	peers      [][]*rpc.ClientEnd   // peers[i][j] = the actual ClientEnd object (nil when i==j)
 	connected  []bool               // connected[i] = is server i currently participating in the network?
 	persisters []*raft.Persister    // each raft instance persister
+
+	// telemetry
+	metricsProvider metric.MeterProvider            // the provider for the meters of all raft instances
+	metricsShutdown func(ctx context.Context) error // shutdown function for meter
+	metrics         []*telemetry.RaftMetrics
 }
 
 // make_config creates an n-node Raft cluster wired through a simulated network.
@@ -45,9 +54,18 @@ func make_config(t *testing.T, n int, unreliable bool) *config {
 		endnames:   make([][]string, n),
 		peers:      make([][]*rpc.ClientEnd, n),
 		connected:  make([]bool, n),
+		metrics:    make([]*telemetry.RaftMetrics, n),
 	}
 	cfg.net.Reliable(!unreliable)
-
+	
+	// First set up the telemtry providers
+	provider, shtdwnFn, err := telemetry.NewMeterProvider("Raft", context.Background(), time.Second*2)
+	if err != nil {
+		panic("cannot create meter provider for test")
+	}
+	
+	cfg.metricsProvider = provider
+	cfg.metricsShutdown = shtdwnFn
 	// Phase 1: create all ClientEnds up-front.
 	//
 	// endnames[i][j] is the name server i uses to call server j.
@@ -70,6 +88,12 @@ func make_config(t *testing.T, n int, unreliable bool) *config {
 	// Phase 2: start all Raft instances and register them as RPC services.
 	// Servers must exist in the network before we wire ClientEnds to them.
 	for i := 0; i < n; i++ {
+		// start the telemetry tracker
+		rm, err := telemetry.NewRaftMetrics(cfg.metricsProvider, strconv.Itoa(i))
+		if err != nil {
+			panic("could not create metric instrument for raft instance")
+		}
+		cfg.metrics[i] = rm
 		cfg.startRaft(i)
 	}
 
@@ -117,6 +141,7 @@ func (cfg *config) startRaft(i int) {
 		cfg.persisters[i] = new(raft.Persister)
 	}
 	cfg.rafts[i] = raft.Make(peers, i, cfg.applyChan[i], cfg.persisters[i])
+	cfg.rafts[i].SetMetrics(cfg.metrics[i])
 
 	// Register the Raft instance as an RPC service so that incoming
 	// RequestVote and AppendEntries calls dispatched by rpc.Network
@@ -288,4 +313,5 @@ func (cfg *config) cleanup() {
 		}
 	}
 	cfg.net.Destroy()
+	cfg.metricsShutdown(context.Background())
 }

@@ -16,7 +16,9 @@ func TestSnapshotProbeA(t *testing.T) {
 
 	for i := 0; i < 6; i++ {
 		_, _, ok := cfg.rafts[leader].Start([]byte(fmt.Sprintf("entry-%d", i)))
-		if !ok { t.Fatal("rejected") }
+		if !ok {
+			t.Fatal("rejected")
+		}
 	}
 	msgs := collectMsgs(t, cfg.applyChan[leader], 6, 5*time.Second)
 	snapshotIdx := msgs[len(msgs)-1].Index
@@ -33,7 +35,9 @@ func TestSnapshotProbeA(t *testing.T) {
 				return
 			case <-time.After(100 * time.Millisecond):
 				for i, r := range cfg.rafts {
-					if r == nil { continue }
+					if r == nil {
+						continue
+					}
 					term, isLeader := r.GetState()
 					if isLeader {
 						fmt.Printf("  t=%.1fs: server %d is leader in term %d\n",

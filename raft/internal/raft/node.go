@@ -1,7 +1,7 @@
 package raft
 
 import (
-	"fmt"
+	"context"
 	"math"
 	"time"
 )
@@ -19,6 +19,10 @@ func (rf *Raft) becomeLeader(term int) {
 
 	// we're now leader, set our state to leader
 	rf.state = Leader
+	// record state
+	rf.metrics.RecordState(context.Background(), 2, rf.currentTerm)
+	// record metric that we won the election
+	rf.metrics.RecordElectionWon(context.Background())
 	// initialize nextIndex to lastLogIndex + 1
 	for i := range rf.peers {
 		rf.nextIndex[i] = len(rf.logs) + rf.lastIncludedIndex
@@ -77,15 +81,9 @@ func (rf *Raft) sendEntries(term int) {
 					// on the entries the peer requires
 					// a next index value <= rf.lastIncludedIndex (our snapshot) means the peer needs to install our snapshot
 					// while any > lastIncludedIndex gets an append entry
-					fmt.Printf("[ROUTE] S%d→S%d nextIndex=%d lastIncludedIndex=%d\n",
-						rf.me, peerId, rf.nextIndex[peerId], rf.lastIncludedIndex)
 					if rf.nextIndex[peerId] <= rf.lastIncludedIndex {
-						fmt.Printf("[IS]    S%d→S%d sending InstallSnapshot (snapLastIdx=%d)\n",
-							rf.me, peerId, rf.persister.snapShot.lastIncludedIndex)
 						rf.sendInstallSnapshotHelper(peer, peerId, rf.persister.snapShot)
 					} else {
-						fmt.Printf("[AE]    S%d→S%d sending AppendEntries (prevLogIdx=%d logLen=%d)\n",
-							rf.me, peerId, rf.nextIndex[peerId]-1, len(rf.logs))
 						rf.sendAppendEntryHelper(peer, peerId)
 					}
 				} else {
@@ -117,10 +115,9 @@ func (rf *Raft) sendAppendEntryHelper(peer Peer, peerId int) {
 	rf.mu.Unlock()
 	res := new(AppendEntryRes)
 	ok := peer.Call("Raft.AppendEntries", req, res)
+	rf.metrics.RecordAESent(context.Background(), ok)
 	if !ok {
 		// something is wrong with our clientEnd
-		fmt.Printf("[AE-FAIL] S%d→S%d RPC failed (ok=false); nextIndex stays at %d\n",
-			rf.me, peerId, req.PrevLogIndex+1)
 		return
 	} else {
 		rf.mu.Lock()
@@ -134,6 +131,8 @@ func (rf *Raft) sendAppendEntryHelper(peer Peer, peerId int) {
 			rf.currentTerm = res.Term
 			rf.votedFor = -1
 			rf.state = Follower
+			// record loosing election
+			rf.metrics.RecordElectionLost(context.Background())
 			rf.persist()
 		} else {
 			if !res.Appended {
@@ -187,6 +186,7 @@ func (rf *Raft) sendInstallSnapshotHelper(peer Peer, peerId int, snapshot Snapsh
 	res := new(InstallSnapshotRes)
 	rf.mu.Unlock()
 	ok := peer.Call("Raft.InstallSnapshot", req, res)
+	rf.metrics.RecordISSent(context.Background(), ok)
 	if !ok {
 		// something is wrong with our clientend
 		return
@@ -202,6 +202,7 @@ func (rf *Raft) sendInstallSnapshotHelper(peer Peer, peerId int, snapshot Snapsh
 			rf.currentTerm = res.Term
 			rf.votedFor = -1
 			rf.state = Follower
+			rf.metrics.RecordElectionLost(context.Background())
 			rf.persist()
 		} else {
 			// since we sent all snapshot at once, we can increase the peer's nextindex and our commit index

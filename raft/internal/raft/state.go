@@ -2,12 +2,13 @@ package raft
 
 import (
 	"bytes"
-	"fmt"
+	"context"
 	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/peartes/raft/internal/telemetry"
 	gob "github.com/peartes/raft/labgob"
 )
 
@@ -128,6 +129,8 @@ type Raft struct {
 
 	lastIncludedIndex int // index of the last entry included in the most recent snapshot
 	lastIncludedTerm  int // term of the last entry included in the most recent snapshot
+
+	metrics *telemetry.RaftMetrics // this nodes telemetry; nil means no-op
 }
 
 // Make creates and starts a Raft instance.
@@ -261,8 +264,7 @@ func (rf *Raft) applier() {
 				lastIncludedTerm := rf.lastIncludedTerm
 				entries := rf.logs[rf.lastApplied-rf.lastIncludedIndex+1 : rf.commitIndex-rf.lastIncludedIndex+1]
 				rf.lastApplied = rf.commitIndex
-				fmt.Printf("[APPLY] S%d: snapShot_nil=%v lastApplied=%d commitIdx=%d lastIncluded=%d entries=%d\n",
-					rf.me, snapShot == nil, lastApplied, rf.commitIndex, rf.lastIncludedIndex, len(entries))
+				rf.metrics.RecordLogState(context.Background(), len(rf.logs), rf.commitIndex, rf.lastApplied)
 				rf.mu.Unlock() // we don't want to hold the lock and block on channel
 				// send the snapshot first if there is any
 				if snapShot != nil {
@@ -307,7 +309,8 @@ func (rf *Raft) persist() {
 	}
 	rfBzb := rfBz.Bytes()
 	rf.persister.store(&rfBzb)
-
+	rf.metrics.RecordState(context.Background(), rf.state, rf.currentTerm)
+	rf.metrics.RecordLogState(context.Background(), len(rf.logs), rf.commitIndex, rf.lastApplied)
 }
 
 // readPersist reads the content of the raft persister struct
@@ -344,4 +347,13 @@ func (rf *Raft) Snapshot(index int, data []byte) {
 	rf.commitIndex = int(math.Max(float64(rf.commitIndex), float64(index)))
 	rf.lastApplied = int(math.Max(float64(rf.lastApplied), float64(index)))
 	rf.persist()
+}
+
+// SetMetrics attaches a pre-built RaftMetrics to this node.
+// Call this after Make and before the node begins processing RPCs.
+// Passing nil is valid and results in silent no-ops for all metric calls.
+func (rf *Raft) SetMetrics(m *telemetry.RaftMetrics) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.metrics = m
 }

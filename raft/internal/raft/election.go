@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"context"
 	rng "crypto/rand"
 	"fmt"
 	"math/big"
@@ -66,6 +67,8 @@ func (rf *Raft) startElection() {
 			LastLogIndex: len(rf.logs) - 1 + rf.lastIncludedIndex,
 			LastLogTerm:  rf.logs[len(rf.logs)-1].Term,
 		}
+		// record metric for elections
+		rf.metrics.RecordElectionStarted(context.Background())
 
 		// send request vote rpc to all peers
 		for _, peer := range rf.peers {
@@ -93,6 +96,7 @@ func (rf *Raft) startElection() {
 								rf.state = Follower
 								rf.currentTerm = res.Term
 								rf.votedFor = -1
+								rf.metrics.RecordElectionLost(context.Background())
 								rf.persist()
 								rf.mu.Unlock()
 							} else {

@@ -1,17 +1,16 @@
 package raft
 
 import (
-	"fmt"
+	"context"
 	"math"
 )
 
 func (rf *Raft) AppendEntries(req AppendEntryReq, res *AppendEntryRes) {
+	rf.metrics.RecordAEReceived(context.Background())
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	// if server is killed reject
 	if !rf.killed() {
-		fmt.Printf("[AE-RECV] S%d ← S%d: prevLogIdx=%d entries=%d leaderCommit=%d lastIncluded=%d\n",
-			rf.me, req.Id, req.PrevLogIndex, len(req.Entries), req.LeaderCommitIndex, rf.lastIncludedIndex)
 		// make sure leader term is at least the same as ours
 		if req.Term < rf.currentTerm {
 			// leader is stale
@@ -25,6 +24,10 @@ func (rf *Raft) AppendEntries(req AppendEntryReq, res *AppendEntryRes) {
 		// update the election timeout
 		rf.setNewElectionTimeout()
 		// set ourself to follower just in case we are a candidate
+		// if we were leader, record lost election
+		if rf.state == Leader {
+			rf.metrics.RecordElectionLost(context.Background())
+		}
 		rf.state = Follower
 		// now we check if we have the same entry at the prevLogIndex
 		if req.PrevLogIndex >= len(rf.logs)+rf.lastIncludedIndex {
@@ -107,12 +110,11 @@ func (rf *Raft) AppendEntries(req AppendEntryReq, res *AppendEntryRes) {
 // it updates the commit index
 // trims the rafts logs to [i:]
 func (rf *Raft) InstallSnapshot(req InstallSnapshotReq, res *InstallSnapshotRes) {
+	rf.metrics.RecordISReceived(context.Background())
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
 	if !rf.killed() {
-		fmt.Printf("[IS-RECV] S%d ← S%d: lastIncludedIndex=%d currentLastIncluded=%d\n",
-			rf.me, req.LeaderId, req.LastIncludedIndex, rf.lastIncludedIndex)
 		if req.Term < rf.currentTerm {
 			// the leader is stale return immediately
 			res.Term = rf.currentTerm
@@ -120,6 +122,9 @@ func (rf *Raft) InstallSnapshot(req InstallSnapshotReq, res *InstallSnapshotRes)
 		}
 		rf.setNewElectionTimeout()
 		// update our state
+		if rf.state == Leader {
+			rf.metrics.RecordElectionLost(context.Background())
+		}
 		rf.state = Follower
 		rf.currentTerm = req.Term
 		// now we delete all entries from 0 up to the lastIncludedLogIndex

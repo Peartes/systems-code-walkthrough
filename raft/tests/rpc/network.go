@@ -2,7 +2,6 @@ package rpc
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"math/rand"
 	"reflect"
@@ -232,7 +231,8 @@ func (n *Network) SetEndOwner(endName, serverName string) {
 
 // DisableServer cuts all connections to and from serverName.
 // Affects: all ClientEnds owned by serverName (outbound) and
-//          all ClientEnds whose destination is serverName (inbound).
+//
+//	all ClientEnds whose destination is serverName (inbound).
 func (n *Network) DisableServer(serverName string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -314,7 +314,6 @@ func NewService(service any) *Service {
 	// get the methods of the service
 	srvc := &Service{}
 	srvcType := reflect.TypeOf(service)
-	fmt.Printf("labrpc.NewService: creating service for type %v\n", srvcType)
 	srvc.recvr = reflect.ValueOf(service)
 	srvc.methods = make(map[string]reflect.Method)
 	srvc.name = reflect.Indirect(reflect.ValueOf(service)).Type().Name()
