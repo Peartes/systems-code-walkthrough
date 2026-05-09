@@ -1,0 +1,129 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn theme tokens — dark-only by design (the html element is permanently
+   classed `dark` in main.tsx, so :root falls back to these values too).
+   Token names match the shadcn defaults so future `npx shadcn add` invocations
+   slot in cleanly. */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root,
+.dark {
+  --radius: 0.625rem;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family:
+      ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      Roboto, sans-serif;
+    margin: 0;
+  }
+}
+
+/* Marching-ants: animates the dash pattern of cluster-graph edges so a
+   line visibly "flows" from leader to follower. The keyframe shifts
+   stroke-dashoffset by exactly one dash period (8 units = 6 dash + 2 gap),
+   which is what makes the motion seamless and perceptually constant. */
+@keyframes raft-edge-march {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -8; }
+}
+
+.raft-edge {
+  stroke-dasharray: 6 2;
+  animation: raft-edge-march 0.6s linear infinite;
+}
+
+/* Leader pulse: an outward-expanding ring that fades to 0 at apex. The
+   spread radius grows from 0 to 14px while alpha decays to 0, producing
+   a clean "heartbeat" without any visible final state — the box-shadow
+   resets each cycle. Only applied to a node that is currently the
+   reachable, non-partitioned leader. */
+@keyframes raft-leader-pulse {
+  0%   { box-shadow: 0 0 0 0     rgb(16 185 129 / 0.55); }
+  70%  { box-shadow: 0 0 0 14px  rgb(16 185 129 / 0);    }
+  100% { box-shadow: 0 0 0 0     rgb(16 185 129 / 0);    }
+}
+
+.raft-leader-pulse {
+  animation: raft-leader-pulse 1.6s ease-out infinite;
+}
+
+/* Theme-aware thin scrollbar for the log-strip and other horizontal
+   overflow areas. The default macOS / Chrome scrollbar shows up as a
+   bright line in dark mode; this matches the muted palette and only
+   surfaces on hover. Works in Firefox via scrollbar-* and in Chromium
+   via the ::-webkit-scrollbar pseudo-elements. */
+.raft-thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.4 0 0 / 0.5) transparent;
+}
+.raft-thin-scroll::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.raft-thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.raft-thin-scroll::-webkit-scrollbar-thumb {
+  background: oklch(0.4 0 0 / 0.5);
+  border-radius: 3px;
+}
+.raft-thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.5 0 0 / 0.7);
+}

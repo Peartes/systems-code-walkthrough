@@ -1,0 +1,14 @@
+# Grafana datasource provisioning. Loaded automatically on startup —
+# no manual "Add data source" click required.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus               # stable UID so the dashboard JSON can reference it
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090   # service name from docker-compose.yml
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 3s            # matches prometheus.yml scrape_interval

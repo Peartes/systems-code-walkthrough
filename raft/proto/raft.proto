@@ -1,6 +1,96 @@
-syntax = "proto2";
+syntax = "proto3";
 
-package package_name;
+package raft.v1;
 
+option go_package = "github.com/peartes/raft/proto;raftpb";
 
-// RequestVote, AppendEntries, InstallSnapshot
+// LogEntry mirrors raft.Log in internal/raft/state.go.
+message LogEntry {
+  int64 term = 1;
+  bytes entry = 2;
+}
+
+// ===== Raft service: peer-to-peer RPCs =====
+
+service Raft {
+  rpc RequestVote(RequestVoteReq) returns (RequestVoteRes);
+  rpc AppendEntries(AppendEntryReq) returns (AppendEntryRes);
+  rpc InstallSnapshot(InstallSnapshotReq) returns (InstallSnapshotRes);
+}
+
+message RequestVoteReq {
+  int64 term = 1;
+  int64 last_log_index = 2;
+  int64 last_log_term = 3;
+  int64 id = 4;
+}
+
+message RequestVoteRes {
+  int64 term = 1;
+  bool vote_granted = 2;
+}
+
+message AppendEntryReq {
+  int64 id = 1;
+  int64 term = 2;
+  int64 prev_log_index = 3;
+  int64 prev_log_term = 4;
+  int64 leader_commit_index = 5;
+  repeated LogEntry entries = 6;
+}
+
+message AppendEntryRes {
+  int64 term = 1;
+  bool appended = 2;
+}
+
+message InstallSnapshotReq {
+  int64 term = 1;
+  int64 leader_id = 2;
+  int64 last_included_index = 3;
+  int64 last_included_term = 4;
+  bytes data = 5;
+  int64 offset = 6;
+  bool done = 7;
+}
+
+message InstallSnapshotRes {
+  int64 term = 1;
+}
+
+// ===== RaftControl service: dashboard / operator RPCs =====
+// Wired by cmd/node in conversation 2; defined here so the wire format
+// is fixed up front.
+
+service RaftControl {
+  rpc GetState(GetStateReq) returns (GetStateRes);
+  rpc SubmitCommand(SubmitCommandReq) returns (SubmitCommandRes);
+  rpc SetPartitioned(SetPartitionedReq) returns (SetPartitionedRes);
+}
+
+message GetStateReq {}
+
+message GetStateRes {
+  int64 term = 1;
+  // role: 0 = Follower, 1 = Candidate, 2 = Leader (matches the iota in state.go).
+  int32 role = 2;
+  repeated LogEntry logs = 3;
+  int64 commit_index = 4;
+  int64 last_applied = 5;
+}
+
+message SubmitCommandReq {
+  bytes command = 1;
+}
+
+message SubmitCommandRes {
+  int64 index = 1;
+  int64 term = 2;
+  bool is_leader = 3;
+}
+
+message SetPartitionedReq {
+  bool partitioned = 1;
+}
+
+message SetPartitionedRes {}

@@ -83,13 +83,19 @@ type ApplyMsg struct {
 	Snapshot []byte // snapshot message for state machine
 }
 
-// Persister persists raft data (into memeory for now)
+// Persister persists raft data. Default zero-value is in-memory (test-harness
+// behavior). Build with NewFilePersister to mirror writes to disk.
 // the struct implements a save([]byte) and a load() method
 type Persister struct {
 	data []byte // data is serialized as [votedFor] - [term] - [logs]
 	// 										 1 byte		16byte
 	snapShot             Snapshot // the complete raft instance snapshot
 	snapShotIntermediate Snapshot // the intermediate snapshot file while it's been streamed from leader
+
+	// File backing — empty paths mean "memory-only" so the test harness's
+	// `new(raft.Persister)` continues to work unchanged.
+	dataPath string
+	snapPath string
 }
 
 type Snapshot struct {
@@ -194,6 +200,35 @@ func (rf *Raft) GetState() (term int, isLeader bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.currentTerm, rf.state == Leader
+}
+
+// Inspection holds a point-in-time, read-only snapshot of a Raft node's
+// state. It is the value returned by Inspect and is safe for callers to
+// retain after the node mutates further state.
+type Inspection struct {
+	Term        int
+	Role        int // Follower | Candidate | Leader
+	Logs        []Log
+	CommitIndex int
+	LastApplied int
+}
+
+// Inspect returns a copy of this node's observable state. Used by the
+// control plane (RaftControl.GetState gRPC) to serve dashboards. The
+// returned Logs slice is a copy — callers may mutate it without affecting
+// the engine.
+func (rf *Raft) Inspect() Inspection {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	logsCopy := make([]Log, len(rf.logs))
+	copy(logsCopy, rf.logs)
+	return Inspection{
+		Term:        rf.currentTerm,
+		Role:        rf.state,
+		Logs:        logsCopy,
+		CommitIndex: rf.commitIndex,
+		LastApplied: rf.lastApplied,
+	}
 }
 
 func (rf *Raft) GetLog(idx int) (bool, Log) {

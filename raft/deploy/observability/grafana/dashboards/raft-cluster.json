@@ -1,0 +1,319 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["raft"],
+  "templating": {
+    "list": [
+      {
+        "name": "node",
+        "label": "Node",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(Raft_raft_node_term, server_id)",
+        "query": {
+          "query": "label_values(Raft_raft_node_term, server_id)",
+          "refId": "StandardVariableQuery"
+        },
+        "current": { "selected": false, "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".+",
+        "options": [],
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "hide": 0
+      }
+    ]
+  },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Raft Cluster",
+  "uid": "raft-cluster",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Current role",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "Raft_raft_node_state{server_id=~\"$node\"}",
+          "legendFormat": "node {{server_id}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Follower",  "color": "blue",   "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "Candidate", "color": "yellow", "index": 1 } } },
+            { "type": "value", "options": { "2": { "text": "Leader",    "color": "green",  "index": 2 } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue",   "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green",  "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Current term",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "Raft_raft_node_term{server_id=~\"$node\"}",
+          "legendFormat": "node {{server_id}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "center"
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Term over time",
+      "description": "Should monotonically increase. Frequent jumps imply elections; bursts of jumps imply election storms (often a too-tight election timeout or network instability).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "Raft_raft_node_term{server_id=~\"$node\"}",
+          "legendFormat": "node {{server_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "showPoints": "never",
+            "axisPlacement": "auto",
+            "spanNulls": true
+          },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+    {
+      "id": 4,
+      "type": "state-timeline",
+      "title": "Role timeline",
+      "description": "Each row is one node. Bands show role over time — green=Leader, yellow=Candidate, blue=Follower. Reading horizontally tells you the leadership history of the cluster at a glance.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "Raft_raft_node_state{server_id=~\"$node\"}",
+          "legendFormat": "node {{server_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Follower",  "color": "blue",   "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "Candidate", "color": "yellow", "index": 1 } } },
+            { "type": "value", "options": { "2": { "text": "Leader",    "color": "green",  "index": 2 } } }
+          ],
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue",   "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "green",  "value": 2 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "mergeValues": true,
+        "showValue": "auto",
+        "alignValue": "left",
+        "rowHeight": 0.9,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Log progress (length / commit / applied)",
+      "description": "Length = entries in the in-memory log. Commit = entries known durable on a majority. Applied = entries delivered to the state machine. A healthy cluster keeps these three lines tight together; a growing gap is replication lag.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "Raft_raft_log_length{server_id=~\"$node\"}",
+          "legendFormat": "node {{server_id}} · length"
+        },
+        {
+          "refId": "B",
+          "expr": "Raft_raft_log_commit_index{server_id=~\"$node\"}",
+          "legendFormat": "node {{server_id}} · commit"
+        },
+        {
+          "refId": "C",
+          "expr": "Raft_raft_log_last_applied{server_id=~\"$node\"}",
+          "legendFormat": "node {{server_id}} · applied"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["lastNotNull", "max"] }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "AppendEntries RPC rate (per second, by outcome)",
+      "description": "Heartbeats and replication traffic. failure rate climbing means the leader is failing to reach followers — partition, crashed peer, or saturated network.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(Raft_raft_rpc_append_entries_sent_total{server_id=~\"$node\"}[1m]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "stacking": { "mode": "none" },
+            "spanNulls": true
+          },
+          "unit": "reqps"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "failure" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Election events (per second)",
+      "description": "Started = a node's election timer fired. Won = it gathered a majority of votes. Lost = it discovered a higher term mid-flight and stepped down. In steady state all three should be flat at 0.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 22 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (server_id) (rate(Raft_raft_election_started_total{server_id=~\"$node\"}[1m]))",
+          "legendFormat": "node {{server_id}} · started"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (server_id) (rate(Raft_raft_elections_won_total{server_id=~\"$node\"}[1m]))",
+          "legendFormat": "node {{server_id}} · won"
+        },
+        {
+          "refId": "C",
+          "expr": "sum by (server_id) (rate(Raft_raft_elections_lost_total{server_id=~\"$node\"}[1m]))",
+          "legendFormat": "node {{server_id}} · lost"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 80,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "color": { "mode": "palette-classic" },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["sum"] }
+      }
+    }
+  ]
+}
