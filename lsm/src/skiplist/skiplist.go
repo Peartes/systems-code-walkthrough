@@ -63,10 +63,11 @@ func (sk *SkipList) Insert(key string, value []byte, tombstone bool) (oldValueLe
 	// prevNode is the previous node if found is false and the node itself if found is true
 	prevNode, update, found := sk.Lookup(key)
 	if found {
+		size := len(prevNode.value)
 		// this key exist, update it
 		prevNode.value = value
 		prevNode.tombstone = tombstone
-		return len(prevNode.key) + len(prevNode.value), true
+		return size, true
 	}
 	// get the height of this node
 	height := MaxHeight(sk.rand, uint8(sk.maxHeight), sk.prob)
@@ -84,7 +85,7 @@ func (sk *SkipList) Insert(key string, value []byte, tombstone bool) (oldValueLe
 		update[i].next[i] = node
 	}
 	sk.length++
-	return len(prevNode.key) + len(prevNode.value), false
+	return 0, false
 }
 
 // Lookup searches for a node in a skip list and performs a partial search for insertion if the partial boolean is set
@@ -151,7 +152,7 @@ func (sk *SkipList) Get(key string) (value []byte, tombstone bool, found bool) {
 
 // Iterate walks the skiplist on the first level applying the func to each node
 // in the skiplist and stops early if fn returns false
-func (sk *SkipList) Iterate(fn func(key string, value []byte, tombstone bool) bool) {
+func (sk *SkipList) Iterate(fn func(key string, value []byte, tombstone bool) bool) bool {
 	currNode := sk.root
 	for {
 		nextNode := currNode.next[0]
@@ -159,10 +160,11 @@ func (sk *SkipList) Iterate(fn func(key string, value []byte, tombstone bool) bo
 			break
 		}
 		if !fn(nextNode.key, nextNode.value, nextNode.tombstone) {
-			return
+			return false
 		}
 		currNode = nextNode
 	}
+	return true
 }
 
 // Len gets the number of entries in the skip list

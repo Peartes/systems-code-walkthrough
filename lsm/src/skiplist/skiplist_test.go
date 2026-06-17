@@ -319,6 +319,87 @@ func TestLen_IncrementsOnUniqueInsertOnly(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// Insert return values (for memtable size accounting)
+// ----------------------------------------------------------------------------
+
+func TestInsertReturn_NewKey_OnEmptyList(t *testing.T) {
+	sl := newTestList(1)
+	oldLen, wasOverwrite := sl.Insert("foo", []byte("hello"), false)
+	if wasOverwrite {
+		t.Fatalf("expected wasOverwrite=false for a brand-new key, got true")
+	}
+	if oldLen != 0 {
+		t.Fatalf("expected oldValueLen=0 for a brand-new key, got %d", oldLen)
+	}
+}
+
+func TestInsertReturn_NewKey_WithPredecessor(t *testing.T) {
+	// Regression test for the bug where the not-found branch returned the
+	// predecessor's key/value length instead of 0.
+	sl := newTestList(1)
+	sl.Insert("apple", []byte("red"), false) // predecessor for "banana"
+	oldLen, wasOverwrite := sl.Insert("banana", []byte("yellow"), false)
+	if wasOverwrite {
+		t.Fatalf("expected wasOverwrite=false for new key 'banana', got true")
+	}
+	if oldLen != 0 {
+		t.Fatalf("expected oldValueLen=0 for new key, got %d (predecessor data leaked?)", oldLen)
+	}
+}
+
+func TestInsertReturn_Overwrite_ReturnsOldValueLen(t *testing.T) {
+	sl := newTestList(1)
+	sl.Insert("foo", []byte("hello"), false) // 5 bytes
+
+	oldLen, wasOverwrite := sl.Insert("foo", []byte("world!"), false)
+	if !wasOverwrite {
+		t.Fatalf("expected wasOverwrite=true for existing key, got false")
+	}
+	if oldLen != 5 {
+		t.Fatalf("expected oldValueLen=5 (old value 'hello'), got %d", oldLen)
+	}
+}
+
+func TestInsertReturn_OverwriteToShorterValue(t *testing.T) {
+	sl := newTestList(1)
+	sl.Insert("foo", []byte("verylongvalue"), false) // 13 bytes
+
+	oldLen, wasOverwrite := sl.Insert("foo", []byte("hi"), false)
+	if !wasOverwrite {
+		t.Fatalf("expected wasOverwrite=true")
+	}
+	if oldLen != 13 {
+		t.Fatalf("expected oldValueLen=13, got %d (returned new value's length instead?)", oldLen)
+	}
+}
+
+func TestInsertReturn_OverwriteTombstoneWithValue(t *testing.T) {
+	sl := newTestList(1)
+	sl.Insert("foo", nil, true) // tombstone, value is nil → len 0
+
+	oldLen, wasOverwrite := sl.Insert("foo", []byte("resurrected"), false)
+	if !wasOverwrite {
+		t.Fatalf("expected wasOverwrite=true (tombstone is still a present entry)")
+	}
+	if oldLen != 0 {
+		t.Fatalf("expected oldValueLen=0 (tombstone had nil value), got %d", oldLen)
+	}
+}
+
+func TestInsertReturn_OverwriteValueWithTombstone(t *testing.T) {
+	sl := newTestList(1)
+	sl.Insert("foo", []byte("alive"), false) // 5 bytes
+
+	oldLen, wasOverwrite := sl.Insert("foo", nil, true) // tombstone overwrite
+	if !wasOverwrite {
+		t.Fatalf("expected wasOverwrite=true")
+	}
+	if oldLen != 5 {
+		t.Fatalf("expected oldValueLen=5 (old live value), got %d", oldLen)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // MaxHeight (height generator) properties
 // ----------------------------------------------------------------------------
 
