@@ -58,6 +58,7 @@ func (m *Memtable) Iterate(f func(key string, value []byte, tombstone bool) bool
 func (m *Memtable) SizeBytes() int {
 	return m.size
 }
+
 func (m *Memtable) Freeze() {
 	m.frozen = true
 }

@@ -15,27 +15,34 @@ type Bloom struct {
 	n     int     // number of keys we are to insert into this bloom filter
 	fpr   float64 // the desired false positive rate
 	m     int     // the number of bits in our bloom filter
-	k     int     // the number of bits each key is to set in the filter - doubles for the number of hash
+	k     int     // the number of bits each key is to set in the filter - doubles for the number of hash function we need
 	table []uint8 // our bit-set array. each element in the array is 8bit of the bloom filter
 }
 
 // New creates a new bloom filter optimizing the number of bits allocated based on
 // the number of items (keys) to be inserted and the false positive rate
+//
 // A bloom filter is a very interesting data structure that can tell us if a key was probably inserted
 // into memory and definitively if it was not
+//
 // fpr is the false positive rate. The number of times the bloom filter tells us that a key was set
 // but the key wasn't. To achieve a certain FPR we need to select our number of bits appropriately
+//
 // For some context. We set a bit on if the hash of a key maps to that bit using hash(key) % m
-// Now with all hash function there can be collisions also, some hash will map to the same bit
+//
+// Now with all hash function there can be collisions also, some hash will map to the same bit.
 // This means there will be some false positives. To reduce the false positives we can increase m but that
 // significantly increases the space required to store the keys. Another more elegant way is to require that
 // a key sets more than one bit. A key has to set multiple bits and is considered to be in a SSTable if all
 // the bits are set. This could reduce the fpr because each key now has to set multiple bits
 // but as you'd imagine it also means we set more bit and that takes the fpr up lol so we need to
 // change the m - increase it
+//
 // bloom filters have 2 free parameters (m, k) but really only one independent choice
+//
 // to choose your paramters, first you have your n and desired fpr then you find the m - number of bits in the bloom filter
 // m = -n * ln(p) / ln(2)^2
+//
 // once you have the m then you find the k; k = m/n * ln(2)
 // you can read more or research the math behind it to understand the math more
 func New(n int, fpr float64) (*Bloom, error) {
@@ -208,4 +215,11 @@ func Deserialize(data []byte) (*Bloom, error) {
 // SizeByte returns the size of the bloom filter
 func (blm *Bloom) SizeByte() int {
 	return len(blm.table)
+}
+
+// Table returns a copy of the bloom filter table
+func (blm *Bloom) Table() []uint8 {
+	cp := make([]uint8, len(blm.table))
+	copy(cp, blm.table)
+	return cp
 }
