@@ -1,6 +1,8 @@
 package memtable
 
-import sk "github.com/peartes/lsm/src/skiplist"
+import (
+	sk "github.com/peartes/lsm/src/skiplist"
+)
 
 // A memtable is a data encapsulation layer over a skiplist or any other efficient data structure
 // that an LSM tree uses to keep data in-memory. A memtable makes sure data are flushed into SSTables
@@ -25,7 +27,7 @@ func (m *Memtable) Get(key string) (value []byte, tombstone bool, found bool) {
 func (m *Memtable) Put(key string, value []byte) {
 	// make sure the memtable is not frozen
 	if m.frozen {
-		panic("memtable frozen; not accepting edit")
+		panic(ErrorAttemptWriteToFrozenMemtable)
 	}
 	oldValueLen, overwritten := m.sl.Insert(key, value, false)
 	if !overwritten {
@@ -38,7 +40,7 @@ func (m *Memtable) Put(key string, value []byte) {
 
 func (m *Memtable) Delete(key string) {
 	if m.frozen {
-		panic("memtable frozen; not accepting deletes")
+		panic(ErrorAttemptDeleteFromFrozenMemtable)
 	}
 	oldValueLen, overwritten := m.sl.Insert(key, nil, true)
 	if !overwritten {
