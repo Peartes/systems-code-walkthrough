@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/peartes/lsm/src/memtable"
 	"github.com/peartes/lsm/src/sstable"
@@ -34,6 +35,8 @@ type DB struct {
 	queue    *flushQueue
 	ssts     []*sstable.Reader // sorted DESCENDING by seqno (index 0 = newest)
 	manifest *Manifest
+
+	flushWG sync.WaitGroup
 }
 
 type Options struct {
@@ -75,6 +78,14 @@ func Open(dir string, seed int64, opt Options) (*DB, error) {
 			walSeqNo, err := strconv.Atoi(strings.Split(strings.Split(entry.Name(), "-")[1], ".")[0])
 			if err != nil {
 				return nil, fmt.Errorf("%w: %w", ErrLSMReadWals, err)
+			}
+			// any WAL file that has an sstable written out and in the manifest is an orphan WAL
+			if slices.Contains(man.LiveSSTables, uint64(walSeqNo)) {
+				// This WAL's data is already durably in <walSeqNo>.sst. Orphan.
+				if err = os.Remove(filepath.Join(dir, entry.Name())); err != nil {
+					fmt.Printf("lsm: cannot delete orphaned WAL file %s", entry.Name())
+				}
+				continue
 			}
 			walsSeqNo = append(walsSeqNo, uint64(walSeqNo))
 		}
@@ -193,7 +204,103 @@ func Open(dir string, seed int64, opt Options) (*DB, error) {
 	db.active = memTable
 	db.wal = wal
 	db.walSeqno = walSeqNo
+	db.flushWG.Add(1)
+	go db.flushLoop()
 	return db, nil
+}
+
+// flushLoop writes out the memtables in flush queue into sstables
+func (db *DB) flushLoop() {
+	defer db.flushWG.Done()
+	for {
+		entry := db.queue.waitForHead()
+		if entry == nil {
+			return // queue closed
+		}
+		for {
+			reader, err := db.flushOneP1(entry)
+			if err == nil {
+				for {
+					if err = db.flushOneP2(entry.seqno, reader, entry.walPath); err == nil {
+						break
+					}
+					// Retry with backoff.
+					time.Sleep(500 * time.Millisecond)
+				}
+				break
+			} else {
+				// Retry with backoff.
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+		// delete the WAL file; best effort try
+		// if it fails it doesn't break anything
+		if err := os.Remove(entry.walPath); err != nil {
+			fmt.Printf("%s: %s", ErrLSMWALError, err)
+		}
+
+	}
+}
+
+// flsuhOneP1 is the first phase of writing out a memtable to sstable
+//
+// the first phase writes the memtable into sstable durably then opens a reader for the sstable
+//
+// this assures that the sstable is commited and that the flush loop does not have to re-write this to disk
+func (db *DB) flushOneP1(entry *flushEntry) (*sstable.Reader, error) {
+	// open the sstable writer
+	sstPath := filepath.Join(db.dir, fmt.Sprintf("%d.sst", entry.seqno))
+	writer, err := sstable.NewWriter(sstPath, entry.memtable.Len(), 0.01)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrLSMWriteSSTable, err)
+	}
+	if ok := entry.memtable.Iterate(func(key string, value []byte, tombstone bool) bool {
+		// write out to the sstable
+		if err = writer.Add(key, value, tombstone); err != nil {
+			return false
+		}
+		return true
+	}); !ok {
+		return nil, ErrLSMWriteSSTable
+	}
+	// write out to disk
+	if err = writer.Finish(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrManifestFileSave, err)
+	}
+	// open the sstable for reading so we can use it in the session
+	reader, err := sstable.OpenReader(sstPath)
+	if err != nil {
+		// if we cannot open a reader into this sstable, we cannot remove it from memory
+		return nil, fmt.Errorf("%w: %w", ErrLSMFileOpen, err)
+	}
+	return reader, nil
+}
+
+// flushOneP2 is the second phase of writing out a memtable into an sstable
+//
+// this is the cleanup phase that makes sure the written sstable is saved into the manifest,
+// the WAL deleted and the db now uses the sstables
+//
+// seqno is the sequence number of the last sstable that's been written out
+func (db *DB) flushOneP2(seqNo uint64, reader *sstable.Reader, walPath string) error {
+	// update the manifest
+	db.manifest.AddSSTable(seqNo)
+	if err := db.manifest.Save(); err != nil {
+		// we error on this even though it does not affect the running process
+		// but if we carry out writing out the next WAL, this might break logic in Get operations
+		// where we write out WAL-2 but not WAL-1 and on next db init, we will read WAL-1 first
+		// before reading SSTable-2 which inverse the flow
+		return fmt.Errorf("%w: %w", ErrManifestFileSave, err)
+	}
+
+	// now update the ssts in the db
+	db.mu.Lock()
+	// we need to prepend this sst to the list of ssts
+	db.ssts = append([]*sstable.Reader{reader}, db.ssts...)
+	// now pop the flush queue
+	db.queue.popHead()
+	db.mu.Unlock()
+	return nil
 }
 
 // Put inserts a key into the LSM
@@ -337,9 +444,25 @@ func (db *DB) Get(key string) (value []byte, found bool, err error) {
 
 // Close function closes connection to WAL file
 func (db *DB) Close() error {
-	err := db.wal.Close()
-	if err != nil {
+	db.mu.Lock()
+	// 1. Close the active WAL.
+	if err := db.wal.Close(); err != nil {
 		return fmt.Errorf("%w: %w", ErrLSMFileClose, err)
 	}
+	db.mu.Unlock()
+
+	// 2. Signal the flush goroutine to exit.
+	db.queue.close()
+
+	// 3. Wait for it to finish any in-flight flush.
+	db.flushWG.Wait()
+
+	// 4. Close all SSTable readers.
+	db.mu.Lock()
+	for _, r := range db.ssts {
+		r.Close()
+	}
+	db.mu.Unlock()
+
 	return nil
 }

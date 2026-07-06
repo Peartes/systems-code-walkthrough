@@ -169,30 +169,52 @@ func TestAllocSeqno_Monotonic(t *testing.T) {
 // AddSSTable
 // ----------------------------------------------------------------------------
 
-func TestAddSSTable_PersistsAndAppends(t *testing.T) {
+// AddSSTable is now in-memory only; callers Save separately.
+func TestAddSSTable_AppendsInMemory(t *testing.T) {
+	m := &Manifest{NextSeqNo: 5, LiveSSTables: []uint64{1, 3}}
+	m.AddSSTable(4)
+	if !reflect.DeepEqual(m.LiveSSTables, []uint64{1, 3, 4}) {
+		t.Errorf("expected LiveSSTables=[1 3 4], got %v", m.LiveSSTables)
+	}
+}
+
+// AddSSTable must be idempotent — repeated calls with the same seqno should
+// not append duplicates. This matters for P2 retry safety in the flush path.
+func TestAddSSTable_IdempotentOnRepeatedSeqno(t *testing.T) {
+	m := &Manifest{NextSeqNo: 5, LiveSSTables: []uint64{1, 3}}
+	m.AddSSTable(4)
+	m.AddSSTable(4)
+	m.AddSSTable(4)
+	if !reflect.DeepEqual(m.LiveSSTables, []uint64{1, 3, 4}) {
+		t.Errorf("expected no duplicates on repeated AddSSTable(4); got %v", m.LiveSSTables)
+	}
+}
+
+// After AddSSTable + Save, reloading should see the persisted state.
+func TestAddSSTable_ThenSavePersists(t *testing.T) {
 	dir := t.TempDir()
 	m := &Manifest{dir: dir, NextSeqNo: 5, LiveSSTables: []uint64{1, 3}}
-
-	if err := m.AddSSTable(4); err != nil {
-		t.Fatalf("AddSSTable: %v", err)
+	m.AddSSTable(4)
+	if err := m.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
-	if !reflect.DeepEqual(m.LiveSSTables, []uint64{1, 3, 4}) {
-		t.Errorf("expected in-memory LiveSSTables=[1 3 4], got %v", m.LiveSSTables)
+	m2, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
 	}
-	// Reload and verify the addition was persisted.
-	m2, _ := Load(dir)
 	if !reflect.DeepEqual(m2.LiveSSTables, []uint64{1, 3, 4}) {
 		t.Errorf("persisted LiveSSTables mismatch: got %v", m2.LiveSSTables)
 	}
 }
 
-func TestAddSSTable_MultipleCalls(t *testing.T) {
+func TestAddSSTable_MultipleCallsThenSave(t *testing.T) {
 	dir := t.TempDir()
 	m := &Manifest{dir: dir, NextSeqNo: 1, LiveSSTables: nil}
 	for i := uint64(1); i <= 5; i++ {
-		if err := m.AddSSTable(i); err != nil {
-			t.Fatalf("AddSSTable(%d): %v", i, err)
-		}
+		m.AddSSTable(i)
+	}
+	if err := m.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
 	}
 	m2, _ := Load(dir)
 	want := []uint64{1, 2, 3, 4, 5}

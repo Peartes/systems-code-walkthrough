@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 )
 
 // Manifest struct keeps track of the manifest file and allows append only write to the file
@@ -15,6 +17,8 @@ import (
 //
 // active seqnos are saved as 8byte integers and the next seq no as a 8 byte integer also
 type Manifest struct {
+	mu sync.Mutex
+
 	dir          string // the manifest file directory
 	NextSeqNo    uint64
 	LiveSSTables []uint64
@@ -57,6 +61,8 @@ func Load(dir string) (*Manifest, error) {
 
 // Save persists the manifest file into storage
 func (m *Manifest) Save() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// create a temp manifest file manifest.tmp
 	tmpManifest := fmt.Sprintf("%s.%s", MANIFEST, "tmp")
 	fd, err := os.OpenFile(filepath.Join(m.dir, tmpManifest), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
@@ -88,15 +94,21 @@ func (m *Manifest) Save() error {
 // Returns current NextSeqno; increments the field but does NOT persist.
 // Caller must call Save() at the right moment to make it durable.
 func (m *Manifest) AllocSeqno() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	seqno := m.NextSeqNo
 	m.NextSeqNo += 1
 	return seqno
 }
 
 // Appends seqno to LiveSSTables, keeps sorted, then Save()s.
-func (m *Manifest) AddSSTable(seqno uint64) error {
-	// append seqno to active list
-	// the seqno is guaranteed to be monotonically increasing so no need to sort
+func (m *Manifest) AddSSTable(seqno uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if slices.Contains(m.LiveSSTables, seqno) {
+		return // already present, no-op
+	}
 	m.LiveSSTables = append(m.LiveSSTables, seqno)
-	return m.Save()
 }

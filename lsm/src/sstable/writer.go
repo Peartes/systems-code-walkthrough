@@ -27,11 +27,14 @@ type Writer struct {
 }
 
 // create a writer into an sstable
+//
 // this function creates a new sstable file and it's bloom filter
+//
 // path is the filepath to open
 // expectedItems is the number of keys expected to be written into the sstable
 // this allows us to be able to create a bloom filter that can adequately handle
 // without degradation
+//
 // fpr is the expected false positive rate for the bloom filter
 func NewWriter(path string, expectedItems int, fpr float64) (*Writer, error) {
 	// open the file for writing

@@ -14,4 +14,5 @@ var (
 	ErrQueueClosed         = errors.New("queue: queue closed with active listeners")
 	ErrLSMReadWals         = errors.New("lsm: error reading wal files in directory")
 	ErrLSMReadSST          = errors.New("lsm: error reading sstables files in directory")
+	ErrLSMWriteSSTable     = errors.New("lsm: error writing memtable into sstable")
 )
