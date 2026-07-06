@@ -38,6 +38,12 @@ type SkipList struct {
 	length    int        // the number of nodes in the skiplist
 }
 
+type Options struct {
+	Rand      *rand.Rand // reference to a random numnber generator passed to the maxHeight() function
+	MaxHeight int        // the maximum height of this skip list
+	Prob      float32    // the probability used to get a node max height 0 - 1
+}
+
 // create a new skiplist structure
 func NewSkipList(maxHeight int, prob float32, rand *rand.Rand) SkipList {
 	// create the sentinel node
@@ -165,6 +171,19 @@ func (sk *SkipList) Iterate(fn func(key string, value []byte, tombstone bool) bo
 		currNode = nextNode
 	}
 	return true
+}
+
+func (sk *SkipList) GetRand() *rand.Rand {
+	return sk.rand
+}
+
+// GetSKParams returns the internal
+func (sk *SkipList) GetParams() *Options {
+	return &Options{
+		Rand:      sk.rand,
+		MaxHeight: sk.maxHeight,
+		Prob:      sk.prob,
+	}
 }
 
 // Len gets the number of entries in the skip list

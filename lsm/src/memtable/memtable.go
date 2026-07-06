@@ -70,3 +70,10 @@ func (m *Memtable) IsFrozen() bool { return m.frozen }
 func (m *Memtable) Len() int {
 	return m.sl.Len()
 }
+
+// GetDSParams returns the internal data structure's parameters
+//
+// This is made intentionally generic over any data structure
+func (m *Memtable) GetDSParams() any {
+	return m.sl.GetParams()
+}
