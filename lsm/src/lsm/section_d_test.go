@@ -47,7 +47,7 @@ func countSSTables(t *testing.T, dir string) int {
 func TestRollover_TriggeredByThreshold(t *testing.T) {
 	dir := t.TempDir()
 	// 100-byte threshold: a few Puts will exceed it.
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRollover_TriggeredByThreshold(t *testing.T) {
 
 func TestRollover_ActiveMemtableIsEmptyAfterRollover(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestRollover_FrozenMemtableStillReadable(t *testing.T) {
 	// The frozen memtable moves to the queue; Get must still find its keys
 	// via the queue snapshot.
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	defer db.Close()
 
 	// Write enough to force a rollover, then verify the earliest key is still findable.
@@ -140,7 +140,7 @@ func TestRollover_FrozenMemtableStillReadable(t *testing.T) {
 
 func TestRollover_MultipleRolloversInOrder(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	defer db.Close()
 
 	// Force multiple rollovers.
@@ -158,7 +158,7 @@ func TestRollover_MultipleRolloversInOrder(t *testing.T) {
 
 func TestRollover_ManifestNextSeqNoAdvances(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	defer db.Close()
 
 	startNextSeqNo := db.manifest.NextSeqNo
@@ -178,7 +178,7 @@ func TestRollover_ManifestNextSeqNoAdvances(t *testing.T) {
 
 func TestRollover_DeleteAlsoTriggersRollover(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 50, MaxQueue: 100})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 50, MaxQueue: 100}, false)
 	defer db.Close()
 
 	// Delete-only workload where each Delete adds keylen bytes to the memtable.
@@ -204,7 +204,7 @@ func TestRollover_DurabilityAcrossReopen(t *testing.T) {
 	// still-existing WAL segments (Section E hasn't deleted them yet).
 	dir := t.TempDir()
 
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	const N = 50
 	for i := 0; i < N; i++ {
 		if err := db1.Put(fmt.Sprintf("k-%03d", i), []byte(fmt.Sprintf("val-%03d", i))); err != nil {
@@ -219,7 +219,7 @@ func TestRollover_DurabilityAcrossReopen(t *testing.T) {
 	db1.Close()
 
 	// Reopen. WAL segments from before the close are replayed.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestRollover_DurabilityAcrossReopen(t *testing.T) {
 
 func TestRollover_NewWALFileNamedBySeqno(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	defer db.Close()
 
 	firstSeqno := db.walSeqno
@@ -279,7 +279,7 @@ func TestRollover_ExistingSSTablesRemainQueryable(t *testing.T) {
 	})
 	saveTestManifest(t, dir, 2, []uint64{1})
 
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 100}, false)
 	defer db.Close()
 
 	// Force rollovers with unrelated keys.

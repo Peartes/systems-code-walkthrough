@@ -15,7 +15,7 @@ const testSeed int64 = 42
 func openTestDB(t *testing.T) (*DB, string) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open(%s): %v", dir, err)
 	}
@@ -30,7 +30,7 @@ func TestOpen_CreatesDir(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "deeply", "nested", "dir")
 
-	db, err := Open(nested, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db, err := Open(nested, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -195,7 +195,7 @@ func TestCrashRecovery_ReadbackAcrossClose(t *testing.T) {
 	dir := t.TempDir()
 
 	// Phase 1: write 100 keys, delete 20.
-	db1, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db1, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("first Open: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestCrashRecovery_ReadbackAcrossClose(t *testing.T) {
 	}
 
 	// Phase 2: reopen and verify all surviving + deleted state.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -247,13 +247,13 @@ func TestCrashRecovery_OverwriteHistoryReplayed(t *testing.T) {
 	// Multiple Puts to the same key, then close + reopen. Final value should win.
 	dir := t.TempDir()
 
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	for i := 0; i < 10; i++ {
 		db1.Put("k", []byte(fmt.Sprintf("version-%d", i)))
 	}
 	db1.Close()
 
-	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	defer db2.Close()
 	v, found, _ := db2.Get("k")
 	if !found {
@@ -267,13 +267,13 @@ func TestCrashRecovery_OverwriteHistoryReplayed(t *testing.T) {
 func TestCrashRecovery_DeletedKeyStaysDeletedAfterReopen(t *testing.T) {
 	dir := t.TempDir()
 
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	db1.Put("alive", []byte("yes"))
 	db1.Put("dead", []byte("temp"))
 	db1.Delete("dead")
 	db1.Close()
 
-	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	defer db2.Close()
 	_, foundAlive, _ := db2.Get("alive")
 	if !foundAlive {
@@ -292,7 +292,7 @@ func TestCrashRecovery_NoClose_StillDurable(t *testing.T) {
 	dir := t.TempDir()
 
 	// Phase 1: write data WITHOUT calling Close.
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	for i := 0; i < 50; i++ {
 		if err := db1.Put(fmt.Sprintf("k-%02d", i), []byte(fmt.Sprintf("v-%02d", i))); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -305,7 +305,7 @@ func TestCrashRecovery_NoClose_StillDurable(t *testing.T) {
 	db1.wal.Close()
 
 	// Phase 2: open a fresh DB instance from the same directory and verify.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("reopen after simulated crash: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestOpen_WithCorruptedWAL_ReturnsError(t *testing.T) {
 	dir := t.TempDir()
 
 	// Phase 1: write some records, close cleanly.
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	for i := 0; i < 5; i++ {
 		db1.Put(fmt.Sprintf("k-%d", i), []byte(fmt.Sprintf("v-%d", i)))
 	}
@@ -361,7 +361,7 @@ func TestOpen_WithCorruptedWAL_ReturnsError(t *testing.T) {
 	}
 
 	// Phase 2: reopen. Should fail with a recoverable-WAL error.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if db2 != nil {
 		defer db2.Close()
 		t.Fatalf("expected nil DB on corrupt WAL, got a usable DB")
@@ -381,7 +381,7 @@ func TestOpen_WithCorruptedWAL_ReturnsError(t *testing.T) {
 func TestOpen_WithCorruptedWAL_Permissive_DISABLED(t *testing.T) {
 	t.Skip("Section C uses strict WAL recovery; permissive path removed")
 	dir := t.TempDir()
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	_ = err
 	if db2 == nil {
 		return
@@ -403,13 +403,13 @@ func TestOpen_WithCorruptedWAL_Permissive_DISABLED(t *testing.T) {
 
 func TestClose_ReleasesFile(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	db.Put("k", []byte("v"))
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 	// Reopening should work and find the data.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1<<20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("reopen after Close: %v", err)
 	}

@@ -15,4 +15,5 @@ var (
 	ErrLSMReadWals         = errors.New("lsm: error reading wal files in directory")
 	ErrLSMReadSST          = errors.New("lsm: error reading sstables files in directory")
 	ErrLSMWriteSSTable     = errors.New("lsm: error writing memtable into sstable")
+	ErrLSMOTelInstrument   = errors.New("lsm: error creating otel instrument")
 )

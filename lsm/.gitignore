@@ -1,0 +1,11 @@
+# compiled binaries
+/ycsb
+/loadgen
+
+# LSM data left over from local runs
+/tmp/
+/data/
+
+# editor / OS junk
+.DS_Store
+*.swp

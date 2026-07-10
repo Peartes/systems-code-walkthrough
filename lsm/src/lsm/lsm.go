@@ -2,9 +2,11 @@ package lsm
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,13 +17,19 @@ import (
 
 	"github.com/peartes/lsm/src/memtable"
 	"github.com/peartes/lsm/src/sstable"
+	"github.com/peartes/lsm/src/telemetry"
 	"github.com/peartes/lsm/src/wal"
 	wl "github.com/peartes/lsm/src/wal"
+	prom "github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel/attribute"
 
 	mt "github.com/peartes/lsm/src/memtable"
 
 	sk "github.com/peartes/lsm/src/skiplist"
 )
+
+const scope = "github.com/peartes/lsm/"
 
 type DB struct {
 	dir            string
@@ -37,6 +45,8 @@ type DB struct {
 	manifest *Manifest
 
 	flushWG sync.WaitGroup
+
+	tele *LMetric
 }
 
 type Options struct {
@@ -44,11 +54,17 @@ type Options struct {
 	MaxQueue       int   // default 3
 }
 
+type DBInfo struct {
+	FlushThreshold int64
+	MaxQueue       int64
+	SkipList       *sk.Options
+}
+
 // Open creates a new db using WAL
 //
 // It creates a memtable, checks if there are any WAL files in the dir
 // and loads them into the memtable propagating any warning on any io error and propagatin any other
-func Open(dir string, seed int64, opt Options) (*DB, error) {
+func Open(dir string, seed int64, opt Options, recordMetric bool) (*DB, error) {
 	// first let's make sure the dir exists
 	err := os.MkdirAll(dir, 0755)
 	if err != nil {
@@ -204,6 +220,20 @@ func Open(dir string, seed int64, opt Options) (*DB, error) {
 	db.active = memTable
 	db.wal = wal
 	db.walSeqno = walSeqNo
+	// create tele instruments to record all operations
+	dbInfo := db.GetInfo()
+	teleProvider, err := telemetry.NewMeterProvider(attribute.KeyValue{Key: "name", Value: attribute.StringValue("swiftDb")}, attribute.KeyValue{Key: "mt_ds", Value: attribute.StringValue("skiplist")}, attribute.KeyValue{Key: "sl_height", Value: attribute.Int64Value(int64(dbInfo.SkipList.MaxHeight))}, attribute.KeyValue{Key: "sl_prob", Value: attribute.Int64Value(int64(dbInfo.SkipList.Prob))})
+	if err != nil {
+		fmt.Printf("lsm: cannot creating otel meteric provider")
+	}
+	db.tele, err = NewLMetric(teleProvider, scope)
+	if err != nil {
+		fmt.Printf("lsm: cannot creating otel meteric provider")
+	}
+	if recordMetric {
+		http.Handle("/metrics", promhttp.HandlerFor(prom.DefaultGatherer, promhttp.HandlerOpts{}))
+		go http.ListenAndServe(":9090", nil)
+	}
 	db.flushWG.Add(1)
 	go db.flushLoop()
 	return db, nil
@@ -310,6 +340,13 @@ func (db *DB) flushOneP2(seqNo uint64, reader *sstable.Reader, walPath string) e
 // if the put takes the memtable above threshold then we need to write it out into an sstable
 func (db *DB) Put(key string, value []byte) error {
 	db.mu.Lock()
+	// record tele tp
+	start := time.Now()
+	defer func() {
+		elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+		db.tele.writeL.Record(context.Background(), elapsedMs)
+		db.tele.writeTP.Add(context.Background(), 1)
+	}()
 	// check the memtable size
 	if db.active.SizeBytes() >= int(db.flushThreshold) {
 		if err := db.rolloverLocked(); err != nil {
@@ -387,6 +424,13 @@ func (db *DB) rolloverLocked() error {
 // Delete marks a log as removed/tombstoned
 func (db *DB) Delete(key string) error {
 	db.mu.Lock()
+	// record tele tp
+	start := time.Now()
+	defer func() {
+		elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+		db.tele.deleteL.Record(context.Background(), elapsedMs)
+		db.tele.deleteTP.Add(context.Background(), 1)
+	}()
 	// check the memtable size
 	if db.active.SizeBytes() >= int(db.flushThreshold) {
 		if err := db.rolloverLocked(); err != nil {
@@ -410,6 +454,13 @@ func (db *DB) Delete(key string) error {
 func (db *DB) Get(key string) (value []byte, found bool, err error) {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+	// record tele tp
+	start := time.Now()
+	defer func() {
+		elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+		db.tele.readL.Record(context.Background(), elapsedMs)
+		db.tele.readTP.Add(context.Background(), 1)
+	}()
 	// first we check the memtable for the key
 	if v, ts, found := db.active.Get(key); found {
 		if ts {
@@ -440,6 +491,15 @@ func (db *DB) Get(key string) (value []byte, found bool, err error) {
 		}
 	}
 	return
+}
+
+// return attributes of this lsm tree
+func (db *DB) GetInfo() *DBInfo {
+	return &DBInfo{
+		FlushThreshold: db.flushThreshold,
+		MaxQueue:       int64(db.queue.maxLen),
+		SkipList:       (db.active.GetDSParams()).(*sk.Options),
+	}
 }
 
 // Close function closes connection to WAL file

@@ -30,7 +30,7 @@ func waitUntil(t *testing.T, timeout time.Duration, msg string, f func() bool) {
 
 func TestFlush_ProducesSSTableAndDeletesWAL(t *testing.T) {
 	dir := t.TempDir()
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestFlush_ProducesSSTableAndDeletesWAL(t *testing.T) {
 
 func TestFlush_ManifestUpdatedWithSSTableSeqno(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3}, false)
 	defer db.Close()
 
 	for i := 0; i < 15; i++ {
@@ -82,7 +82,7 @@ func TestFlush_ManifestUpdatedWithSSTableSeqno(t *testing.T) {
 
 func TestFlush_DBsstsUpdatedWithNewReader(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3}, false)
 	defer db.Close()
 
 	for i := 0; i < 15; i++ {
@@ -102,7 +102,7 @@ func TestFlush_DBsstsUpdatedWithNewReader(t *testing.T) {
 
 func TestFlush_GetFindsKeysAfterFlush(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3}, false)
 	defer db.Close()
 
 	const N = 30
@@ -142,7 +142,7 @@ func TestFlush_GetFindsKeysAfterFlush(t *testing.T) {
 func TestFlush_ReopenReadsFromSSTables(t *testing.T) {
 	dir := t.TempDir()
 
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3}, false)
 	const N = 30
 	for i := 0; i < N; i++ {
 		db1.Put(fmt.Sprintf("k-%03d", i), []byte(fmt.Sprintf("v-%03d", i)))
@@ -158,7 +158,7 @@ func TestFlush_ReopenReadsFromSSTables(t *testing.T) {
 	db1.Close()
 
 	// Reopen — data should come from SSTables now.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestOpen_OrphanWALDeleted(t *testing.T) {
 	saveTestManifest(t, dir, 2, []uint64{1})
 	buildWAL(t, dir, 1, []op{{key: "k", value: []byte("v"), tombstone: false}})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestOpen_OrphanWALDeleted(t *testing.T) {
 
 func TestFlush_MultipleFlushesAccumulateNewestFirst(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 10})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 10}, false)
 	defer db.Close()
 
 	// Force multiple rollovers.
@@ -268,7 +268,7 @@ func TestFlush_MultipleFlushesAccumulateNewestFirst(t *testing.T) {
 
 func TestFlush_MemtableShadowsFlushedSSTable(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 100, MaxQueue: 3}, false)
 	defer db.Close()
 
 	// First round: write "shared=old" enough times to force flush.

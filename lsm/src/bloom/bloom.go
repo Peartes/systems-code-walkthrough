@@ -19,6 +19,13 @@ type Bloom struct {
 	table []uint8 // our bit-set array. each element in the array is 8bit of the bloom filter
 }
 
+type Option struct {
+	N   int     // number of keys we are to insert into this bloom filter
+	FPR float64 // the desired false positive rate
+	M   int     // the number of bits in our bloom filter
+	K   int     // the number of bits each key is to set in the filter - doubles for the number of hash function we need
+}
+
 // New creates a new bloom filter optimizing the number of bits allocated based on
 // the number of items (keys) to be inserted and the false positive rate
 //
@@ -222,4 +229,13 @@ func (blm *Bloom) Table() []uint8 {
 	cp := make([]uint8, len(blm.table))
 	copy(cp, blm.table)
 	return cp
+}
+
+func (blm *Bloom) GetInfo() *Option {
+	return &Option{
+		N:   blm.n,
+		FPR: blm.fpr,
+		M:   blm.m,
+		K:   blm.k,
+	}
 }

@@ -19,7 +19,7 @@ import (
 func TestCrash_NoCloseDataStillDurable(t *testing.T) {
 	dir := t.TempDir()
 
-	db1, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db1, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestCrash_NoCloseDataStillDurable(t *testing.T) {
 	db1.mu.Unlock()
 
 	// Reopen: WAL is replayed.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("reopen after simulated crash: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestCrash_MidFlushRecoversFromWAL(t *testing.T) {
 	dir := t.TempDir()
 
 	// Small threshold + small queue → many rollovers, some may not have flushed.
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 5})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 5}, false)
 	const N = 60
 	for i := 0; i < N; i++ {
 		if err := db1.Put(fmt.Sprintf("k-%03d", i), []byte(fmt.Sprintf("val-%03d", i))); err != nil {
@@ -75,7 +75,7 @@ func TestCrash_MidFlushRecoversFromWAL(t *testing.T) {
 	db1.wal.Close()
 	db1.mu.Unlock()
 
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 5})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 5}, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestCrash_OrphanWALAndOrphanSSTableCleaned(t *testing.T) {
 	buildSSTable(t, dir, 2, []string{"orphan"}, map[string][]byte{"orphan": []byte("uncommitted")})
 	saveTestManifest(t, dir, 3, []uint64{1}) // only 1 is live; 2 is orphan
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestCrash_OrphanWALAndOrphanSSTableCleaned(t *testing.T) {
 
 func TestShadowing_PutFlushDeleteFlushReopen(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3}, false)
 
 	// Round 1: Put target=v1 and enough filler to force a flush.
 	db.Put("target", []byte("v1"))
@@ -164,7 +164,7 @@ func TestShadowing_PutFlushDeleteFlushReopen(t *testing.T) {
 	db.Close()
 
 	// Reopen: same story, all from SSTables.
-	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3})
+	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3}, false)
 	defer db2.Close()
 	if _, found, _ := db2.Get("target"); found {
 		t.Errorf("target should stay tombstoned after reopen")
@@ -173,7 +173,7 @@ func TestShadowing_PutFlushDeleteFlushReopen(t *testing.T) {
 
 func TestShadowing_OverwriteAcrossFlushes(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3}, false)
 
 	// Round 1: k=v1, flush.
 	db.Put("k", []byte("v1"))
@@ -201,7 +201,7 @@ func TestShadowing_OverwriteAcrossFlushes(t *testing.T) {
 
 	// Reopen: newest wins (SSTable) — active memtable's v3 is in the WAL
 	// and gets replayed onto the queue.
-	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3})
+	db2, _ := Open(dir, testSeed, Options{FlushThreshold: 80, MaxQueue: 3}, false)
 	defer db2.Close()
 	v, _, _ = db2.Get("k")
 	if string(v) != "v3" {
@@ -215,7 +215,7 @@ func TestShadowing_OverwriteAcrossFlushes(t *testing.T) {
 
 func TestConcurrent_ReadersAndWriter(t *testing.T) {
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 200, MaxQueue: 5})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 200, MaxQueue: 5}, false)
 	defer db.Close()
 
 	const N = 300
@@ -293,7 +293,7 @@ func TestBackpressure_QueueFullBlocksPut(t *testing.T) {
 	// MaxQueue=1 + small threshold → after 2 rapid rollovers, the third Put's
 	// rollover attempts to push into a full queue → blocks until flush drains.
 	dir := t.TempDir()
-	db, _ := Open(dir, testSeed, Options{FlushThreshold: 60, MaxQueue: 1})
+	db, _ := Open(dir, testSeed, Options{FlushThreshold: 60, MaxQueue: 1}, false)
 	defer db.Close()
 
 	// Force many rollovers in a tight loop. The test succeeds if it completes
@@ -332,7 +332,7 @@ func TestEndToEnd_ManyKeysManyFlushesRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
 	const N = 500
-	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 500, MaxQueue: 5})
+	db1, _ := Open(dir, testSeed, Options{FlushThreshold: 500, MaxQueue: 5}, false)
 	for i := 0; i < N; i++ {
 		if err := db1.Put(fmt.Sprintf("k-%04d", i), []byte(fmt.Sprintf("v-%04d", i))); err != nil {
 			t.Fatalf("Put %d: %v", i, err)
@@ -353,7 +353,7 @@ func TestEndToEnd_ManyKeysManyFlushesRoundTrip(t *testing.T) {
 	db1.Close()
 
 	// Reopen — everything through the LSM's cross-layer read path.
-	db2, err := Open(dir, testSeed, Options{FlushThreshold: 500, MaxQueue: 5})
+	db2, err := Open(dir, testSeed, Options{FlushThreshold: 500, MaxQueue: 5}, false)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

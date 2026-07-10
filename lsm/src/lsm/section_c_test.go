@@ -79,7 +79,7 @@ func TestOpen_ReplaysExistingWALSegments(t *testing.T) {
 		{key: "charlie", value: []byte("C2"), tombstone: false},
 	})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 5})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 5}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestOpen_ReplayedWALTombstoneShadowsOlderValue(t *testing.T) {
 		{key: "victim", value: nil, tombstone: true},
 	})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 5})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 5}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestOpen_LoadsSSTablesFromManifest(t *testing.T) {
 	})
 	saveTestManifest(t, dir, 4, []uint64{3})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestOpen_MultipleSSTables_NewestWins(t *testing.T) {
 	})
 	saveTestManifest(t, dir, 6, []uint64{1, 5})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestOpen_SSTableTombstoneShadowsOlderSSTable(t *testing.T) {
 	})
 	saveTestManifest(t, dir, 6, []uint64{1, 5})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestOpen_DeletesOrphanSSTables(t *testing.T) {
 	buildSSTable(t, dir, 3, []string{"k3"}, map[string][]byte{"k3": []byte("live3")})
 	saveTestManifest(t, dir, 4, []uint64{1, 3}) // 2 is missing
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestGet_ActiveMemtableShadowsQueuedMemtable(t *testing.T) {
 		{key: "shared", value: []byte("from-queued"), tombstone: false},
 	})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestGet_QueuedMemtableShadowsSSTable(t *testing.T) {
 		{key: "shared", value: []byte("from-queued"), tombstone: false},
 	})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestGet_ActiveTombstoneShadowsAllLayers(t *testing.T) {
 		{key: "victim", value: []byte("in-queued"), tombstone: false},
 	})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestOpen_NewActiveWALSeqnoIsFresh(t *testing.T) {
 		{key: "k", value: []byte("v"), tombstone: false},
 	})
 
-	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3})
+	db, err := Open(dir, testSeed, Options{FlushThreshold: 1 << 20, MaxQueue: 3}, false)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
