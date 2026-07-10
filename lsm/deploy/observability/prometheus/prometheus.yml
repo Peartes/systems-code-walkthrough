@@ -1,0 +1,25 @@
+# Prometheus scrape config for the LSM key-value store.
+#
+# The LSM is a single-process key-value store — no cluster, no dynamic
+# targets — so we hard-code the scrape endpoint. The LSM binds
+# :9090/metrics on the host; from inside the Prometheus container that's
+# reachable as host.docker.internal:9090 (see docker-compose.yml
+# extra_hosts).
+#
+# scrape_interval = 5s: fine granularity for latency histograms during
+# short benchmark runs (e.g. 10-minute YCSB-B) without producing so many
+# samples that Prometheus's local TSDB gets bloated.
+
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+  external_labels:
+    project: lsm
+
+scrape_configs:
+  - job_name: lsm
+    static_configs:
+      - targets:
+          - host.docker.internal:9090
+        labels:
+          instance: lsm-host

@@ -1,0 +1,363 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "liveNow": false,
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": ["lsm"],
+  "title": "LSM Key-Value Store",
+  "uid": "lsm-kv",
+  "version": 1,
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "title": "Throughput (per second, 1m rate)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": []
+    },
+    {
+      "title": "Reads / sec",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ops"
+        }
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum(rate(lsm_read_total[1m]))",
+        "legendFormat": "reads/s"
+      }]
+    },
+    {
+      "title": "Writes / sec",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ops"
+        }
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum(rate(lsm_write_total[1m]))",
+        "legendFormat": "writes/s"
+      }]
+    },
+    {
+      "title": "Deletes / sec",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "id": 3,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ops"
+        }
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum(rate(lsm_delete_total[1m]))",
+        "legendFormat": "deletes/s"
+      }]
+    },
+    {
+      "title": "Total ops (cumulative)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "id": 4,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] },
+          "unit": "short"
+        }
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum(lsm_read_total) + sum(lsm_write_total) + sum(lsm_delete_total)",
+        "legendFormat": "total"
+      }]
+    },
+    {
+      "title": "Throughput over time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 7 },
+      "id": 5,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(lsm_read_total[1m]))",
+          "legendFormat": "reads/s"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(lsm_write_total[1m]))",
+          "legendFormat": "writes/s"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(lsm_delete_total[1m]))",
+          "legendFormat": "deletes/s"
+        }
+      ]
+    },
+    {
+      "title": "Latency percentiles (ms, 1m window)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 200,
+      "panels": []
+    },
+    {
+      "title": "Read latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "id": 6,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ms"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(lsm_read_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(lsm_read_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p99"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.999, sum by (le) (rate(lsm_read_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p999"
+        }
+      ]
+    },
+    {
+      "title": "Write latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "id": 7,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ms"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(lsm_write_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(lsm_write_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p99"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.999, sum by (le) (rate(lsm_write_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p999"
+        }
+      ]
+    },
+    {
+      "title": "Delete latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 8,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "lineWidth": 2,
+            "pointSize": 4,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ms"
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(lsm_delete_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(lsm_delete_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p99"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.999, sum by (le) (rate(lsm_delete_latency_milliseconds_bucket[1m])))",
+          "legendFormat": "p999"
+        }
+      ]
+    },
+    {
+      "title": "Latency distribution (heatmaps)",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "id": 300,
+      "panels": []
+    },
+    {
+      "title": "Read latency heatmap",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 25 },
+      "id": 9,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": { "scheme": "Spectral", "mode": "scheme", "steps": 64, "exponent": 0.5, "reverse": true },
+        "filterValues": { "le": 1e-9 },
+        "legend": { "show": true },
+        "rowsFrame": { "layout": "auto" },
+        "tooltip": { "show": true, "yHistogram": true },
+        "yAxis": { "axisPlacement": "left", "unit": "ms" }
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (le) (rate(lsm_read_latency_milliseconds_bucket[1m]))",
+        "format": "heatmap",
+        "legendFormat": "{{le}}"
+      }]
+    },
+    {
+      "title": "Write latency heatmap",
+      "type": "heatmap",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 25 },
+      "id": 10,
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "options": {
+        "calculate": false,
+        "cellGap": 1,
+        "color": { "scheme": "Spectral", "mode": "scheme", "steps": 64, "exponent": 0.5, "reverse": true },
+        "filterValues": { "le": 1e-9 },
+        "legend": { "show": true },
+        "rowsFrame": { "layout": "auto" },
+        "tooltip": { "show": true, "yHistogram": true },
+        "yAxis": { "axisPlacement": "left", "unit": "ms" }
+      },
+      "targets": [{
+        "refId": "A",
+        "expr": "sum by (le) (rate(lsm_write_latency_milliseconds_bucket[1m]))",
+        "format": "heatmap",
+        "legendFormat": "{{le}}"
+      }]
+    }
+  ]
+}
