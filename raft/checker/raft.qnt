@@ -11,7 +11,8 @@ module raft {
     var votesGranted: str -> Set[str]
     var messages: Set[Message]
 
-    val electionSafety = nodes.forall(x => nodes.forall(y => (term.get(x) == term.get(y) and role.get(x) == Leader and role.get(y) == Leader) implies (x == y))) 
+    val electionSafety = nodes.forall(x => nodes.forall(y => (term.get(x) == term.get(y) and role.get(x) == Leader and role.get(y) == Leader) implies (x == y)))
+    temporal leaderElected = eventually(nodes.exists(node => role.get(node) == Leader))
 
     action init = all {
         role' = nodes.mapBy(x => Follower),
